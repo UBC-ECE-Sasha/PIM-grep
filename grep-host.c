@@ -18,8 +18,15 @@
 #define MIN_CHUNK_SIZE 128 // not worthwhile making another tasklet work for data less than this
 #define MAX_PATTERN 63
 
-#define MAX_DPUS 1
-struct dpu_set_t working_dpus[MAX_DPUS]; 
+#define NR_DPUS 1
+
+struct {
+	struct dpu_set_t dpu;
+	struct dpu_set_t dpus;
+	struct host_buffer_context *input;
+} working_dpus[NR_DPUS];
+
+int used_dpus;
 
 const char options[]="dt:";
 
@@ -30,19 +37,9 @@ const char options[]="dt:";
  * Prepare the DPU context by copying the input buffer to MRAM and
  * uploading the program to the DPU.
  */
-int search_dpu(struct host_buffer_context *input, const char* pattern, struct grep_options* opts)
+int search_dpu(struct dpu_set_t *dpu, struct host_buffer_context *input, const char* pattern, struct grep_options* opts)
 {
-	struct dpu_set_t dpus;
-	struct dpu_set_t dpu;
-	
-	// Allocate a DPU
-	DPU_ASSERT(dpu_alloc(1, NULL, &dpus));
-
-	DPU_FOREACH(dpus, dpu) {
-		break;
-	}
-
-	//printf("searching for pattern: %s\n", pattern);
+	printf("searching for pattern: %s\n", pattern);
 	// Set up and run the program on the DPU
 	uint32_t input_buffer_start = MEGABYTE(1);
 	//uint32_t output_buffer_start = ALIGN(input_buffer_start + input->length, 64);
@@ -56,42 +53,41 @@ int search_dpu(struct host_buffer_context *input, const char* pattern, struct gr
 	uint32_t chunk_size = MAX(MIN_CHUNK_SIZE, ALIGN(input->length / NR_TASKLETS, 16));
 	//printf("chunk size: 0x%x\n", chunk_size);
 
-	DPU_ASSERT(dpu_load(dpu, DPU_PROGRAM, NULL));
+	DPU_ASSERT(dpu_load(*dpu, DPU_PROGRAM, NULL));
 
-	DPU_ASSERT(dpu_copy_to(dpu, "input_length", 0, &input->length, sizeof(uint32_t)));
-	DPU_ASSERT(dpu_copy_to(dpu, "input_buffer", 0, &input_buffer_start, sizeof(uint32_t)));
-	DPU_ASSERT(dpu_copy_to(dpu, "input_chunk_size", 0, &chunk_size, sizeof(uint32_t)));
-	//DPU_ASSERT(dpu_copy_to(dpu, "output_length", 0, &output_length, sizeof(uint32_t)));
-	//DPU_ASSERT(dpu_copy_to(dpu, "output_buffer", 0, &output_buffer_start, sizeof(uint32_t)));
-	DPU_ASSERT(dpu_copy_to(dpu, "options", 0, opts, ALIGN(sizeof(struct grep_options), 8)));
-	DPU_ASSERT(dpu_copy_to(dpu, "pattern_length", 0, &pattern_length, sizeof(uint32_t)));
-	DPU_ASSERT(dpu_copy_to(dpu, "pattern", 0, pattern, ALIGN(pattern_length, 8)));
+	DPU_ASSERT(dpu_copy_to(*dpu, "input_length", 0, &input->length, sizeof(uint32_t)));
+	DPU_ASSERT(dpu_copy_to(*dpu, "input_buffer", 0, &input_buffer_start, sizeof(uint32_t)));
+	DPU_ASSERT(dpu_copy_to(*dpu, "input_chunk_size", 0, &chunk_size, sizeof(uint32_t)));
+	//DPU_ASSERT(dpu_copy_to(*dpu, "output_length", 0, &output_length, sizeof(uint32_t)));
+	//DPU_ASSERT(dpu_copy_to(*dpu, "output_buffer", 0, &output_buffer_start, sizeof(uint32_t)));
+	DPU_ASSERT(dpu_copy_to(*dpu, "options", 0, opts, ALIGN(sizeof(struct grep_options), 8)));
+	DPU_ASSERT(dpu_copy_to(*dpu, "pattern_length", 0, &pattern_length, sizeof(uint32_t)));
+	DPU_ASSERT(dpu_copy_to(*dpu, "pattern", 0, pattern, ALIGN(pattern_length, 8)));
 
 	// dpu_copy_to_mram allows us to pass a variable size buffer to a variable
 	// location. That means it is more flexible, and we don't have to know the
 	// size of the input buffer ahead of time in the DPU program.
-	dpu_copy_to_mram(dpu.dpu, input_buffer_start, (unsigned char*)input->buffer, ALIGN(input->length, 8), 0);
+	dpu_copy_to_mram(dpu->dpu, input_buffer_start, (unsigned char*)input->buffer, ALIGN(input->length, 8), 0);
 	
-	int ret = dpu_launch(dpu, DPU_ASYNCHRONOUS);
-	if (ret != 0)
+	if (dpu_launch(*dpu, DPU_ASYNCHRONOUS) != 0)
 	{
-		printf("DPU failed\n");
-		DPU_ASSERT(dpu_free(dpus));
+		printf("DPU alloc failed\n");
 		return GREP_INVALID_INPUT;
 	}
 
+	printf("Search started\n");
 	return GREP_OK;
 }
 
-int read_results_dpu(struct dpu_set_t dpu, struct host_buffer_context *output)
+int read_results_dpu(struct dpu_set_t *dpu, struct host_buffer_context *output)
 {
 	uint32_t line_count[NR_TASKLETS];
 	uint32_t match_count[NR_TASKLETS];
 
 	// Get the results back from the DPU 
 	//dpu_copy_from_mram(dpu.dpu, (unsigned char*)output->buffer, output_buffer_start, output->length, 0);
-	DPU_ASSERT(dpu_copy_from(dpu, "line_count", 0, line_count, sizeof(uint32_t) * NR_TASKLETS));
-	DPU_ASSERT(dpu_copy_from(dpu, "match_count", 0, match_count, sizeof(uint32_t) * NR_TASKLETS));
+	DPU_ASSERT(dpu_copy_from(*dpu, "line_count", 0, line_count, sizeof(uint32_t) * NR_TASKLETS));
+	DPU_ASSERT(dpu_copy_from(*dpu, "match_count", 0, match_count, sizeof(uint32_t) * NR_TASKLETS));
 
 	// aggregate the statistics
 	for (uint8_t i=0; i < NR_TASKLETS; i++)
@@ -103,20 +99,24 @@ int read_results_dpu(struct dpu_set_t dpu, struct host_buffer_context *output)
 	return 0;
 }
 
-int wait_dpus(struct host_buffer_context *output)
+int completed_dpus(struct host_buffer_context *output)
 {
-	struct dpu_set_t dpus;
-	struct dpu_set_t dpu;
+	//struct dpu_set_t dpus;
+	//struct dpu_set_t dpu;
 	
-	for (uint8_t i=0; i < MAX_DPUS; i++)
+	//printf("Checking for completed\n");
+	for (uint8_t i=0; i < NR_DPUS; i++)
 	{
 		bool done;
 		bool fault;
+		dpu_error_t status = DPU_ERR_ALLOCATION;
 
-		//if (working_dpus[i] == 0)
-		//	continue;
+		if (working_dpus[i].input)
+		{
+			printf("DPU %u is working\n", i);
+			status = dpu_status(working_dpus[i].dpu, &done, &fault);
+		}
 
-		dpu_error_t status = dpu_status(working_dpus[i], &done, &fault);
 		if (status != DPU_OK)
 		{
 			printf("Error reading DPU %u status\n", i);
@@ -125,16 +125,15 @@ int wait_dpus(struct host_buffer_context *output)
 
 		if (done)
 		{
-			read_results_dpu(working_dpus[i], output);
+			read_results_dpu(&working_dpus[i].dpu, output);
 			printf("DPU %u is done\n", i);
 			// Deallocate the DPUs
-			DPU_FOREACH(dpus, dpu)
-			{
-				DPU_ASSERT(dpu_log_read(dpu, stdout));
-			}
+			//DPU_FOREACH(dpus, dpu)
+			DPU_ASSERT(dpu_log_read(working_dpus[i].dpu, stdout));
 
-			DPU_ASSERT(dpu_free(working_dpus[i]));
-			//working_dpus[i] = 0;
+			DPU_ASSERT(dpu_free(working_dpus[i].dpus));
+			working_dpus[i].input = 0;
+			used_dpus--;
 			return i;
 		}
 	}
@@ -203,16 +202,12 @@ int main(int argc, char **argv)
 	int input_file_count = 0;
 	char *search_term = NULL;
 	char **input_files = NULL;
-	struct host_buffer_context input;
+	struct host_buffer_context *input;
 	struct host_buffer_context output;
 	char pattern[MAX_PATTERN + 1];
 	struct grep_options opts;
 
 	memset(&opts, 0, sizeof(struct grep_options));
-
-	input.buffer = NULL;
-	input.length = 0;
-	input.max = MAX_INPUT_LENGTH;
 
 	output.buffer = NULL;
 	output.length = 0;
@@ -285,16 +280,58 @@ int main(int argc, char **argv)
 	// Read each input file into main memory
 	for (int i=0; i < input_file_count; i++)
 	{
-		if (read_input_host(input_files[i], &input))
+		// prepare an input buffer descriptor
+		input = malloc(sizeof(struct host_buffer_context));
+		input->buffer = NULL;
+		input->length = 0;
+		input->max = MAX_INPUT_LENGTH;
+
+		// read the file into the descriptor
+		if (read_input_host(input_files[i], input))
 			return 1;
 
 		if (use_dpu)
 		{
-			status = search_dpu(&input, pattern, &opts);
+			int dpu_index = NR_DPUS;
 
-			wait_dpus(&output);
+			while (dpu_index == NR_DPUS)
+			{
+				// find a free DPU, and pass it to the input descriptor
+				for (dpu_index=0; dpu_index < NR_DPUS; dpu_index++)
+				{
+					if (!working_dpus[dpu_index].input)
+					{
+						printf("DPU slot %i is free\n", dpu_index);
+						break;
+					}
+				}
+
+				if (dpu_index < NR_DPUS)
+				{
+					printf("Allocating DPU slot %i\n", dpu_index);
+					status = dpu_alloc(1, NULL, &working_dpus[dpu_index].dpus);
+					//ASSERT(dpus.kind == DPU_SET_RANKS);
+
+					// extract the single DPU and save it in our array
+					DPU_FOREACH(working_dpus[dpu_index].dpus, working_dpus[dpu_index].dpu)
+						break;
+					working_dpus[dpu_index].input = input;
+					status = search_dpu(&working_dpus[dpu_index].dpu, input, pattern, &opts);
+					used_dpus++;
+				}
+
+				// check to see if anything has completed
+				completed_dpus(&output);
+			}
+
+			completed_dpus(&output);
 		}
 	}
+
+	// all files have been submitted; wait for all jobs to finish
+	printf("Waiting for all DPUs to finish\n");
+	while (used_dpus)
+		completed_dpus(&output);
 
 	if (status != GREP_OK)
 	{

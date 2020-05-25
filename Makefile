@@ -10,6 +10,9 @@ endif
 # Default NR_TASKLETS
 NR_TASKLETS = 16
 
+# Default number of DPUs
+NR_DPUS = 1
+
 SOURCE = grep-host.c
 
 .PHONY: default all dpu host clean tags
@@ -23,10 +26,10 @@ clean:
 	$(MAKE) -C dpu-grep $@
 
 dpu:
-	DEBUG=$(DEBUG) NR_TASKLETS=$(NR_TASKLETS) $(MAKE) -C dpu-grep
+	DEBUG=$(DEBUG) NR_DPUS=$(NR_DPUS) NR_TASKLETS=$(NR_TASKLETS) $(MAKE) -C dpu-grep
 
 host: $(SOURCE)
-	$(CC) $(CFLAGS) -DNR_TASKLETS=$(NR_TASKLETS) $^ -o $@ $(DPU_OPTS)
+	$(CC) $(CFLAGS) -DNR_DPUS=$(NR_DPUS) -DNR_TASKLETS=$(NR_TASKLETS) $^ -o $@ $(DPU_OPTS)
 
 tags:
 	ctags -R -f tags . ~/projects/upmem/upmem-sdk
