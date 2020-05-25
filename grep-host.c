@@ -18,8 +18,6 @@
 #define MIN_CHUNK_SIZE 128 // not worthwhile making another tasklet work for data less than this
 #define MAX_PATTERN 63
 
-#define NR_DPUS 1
-
 struct {
 	struct dpu_set_t dpu;
 	struct dpu_set_t dpus;
@@ -109,17 +107,17 @@ int completed_dpus(struct host_buffer_context *output)
 	{
 		bool done;
 		bool fault;
-		dpu_error_t status = DPU_ERR_ALLOCATION;
+		dpu_error_t status = -1;
 
-		if (working_dpus[i].input)
-		{
-			printf("DPU %u is working\n", i);
-			status = dpu_status(working_dpus[i].dpu, &done, &fault);
-		}
+		if (!working_dpus[i].input)
+			continue;
+
+		printf("DPU %u is working\n", i);
+		status = dpu_status(working_dpus[i].dpu, &done, &fault);
 
 		if (status != DPU_OK)
 		{
-			printf("Error reading DPU %u status\n", i);
+			printf("Error %u reading DPU %u status\n", status, i);
 			continue;
 		}
 
@@ -127,10 +125,9 @@ int completed_dpus(struct host_buffer_context *output)
 		{
 			read_results_dpu(&working_dpus[i].dpu, output);
 			printf("DPU %u is done\n", i);
-			// Deallocate the DPUs
-			//DPU_FOREACH(dpus, dpu)
 			DPU_ASSERT(dpu_log_read(working_dpus[i].dpu, stdout));
 
+			// Deallocate the DPUs
 			DPU_ASSERT(dpu_free(working_dpus[i].dpus));
 			working_dpus[i].input = 0;
 			used_dpus--;
