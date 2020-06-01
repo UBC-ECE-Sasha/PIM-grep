@@ -12,7 +12,6 @@
 #include "grep-host.h"
 
 #define DPU_PROGRAM "dpu-grep/grep.dpu"
-#define MEGABYTE(_x) (_x << 20)
 #define MAX_INPUT_LENGTH MEGABYTE(32)
 #define MAX_OUTPUT_LENGTH MEGABYTE(32)
 #define MIN_CHUNK_SIZE 128 // not worthwhile making another tasklet work for data less than this
