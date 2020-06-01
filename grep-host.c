@@ -146,7 +146,6 @@ int completed_dpus(struct host_buffer_context *output)
  */
 static int read_input_host(char *in_file, struct host_buffer_context *input)
 {
-	printf("Loading file %s\n", in_file);
 	FILE *fin = fopen(in_file, "r");
 	if (fin == NULL) {
 		fprintf(stderr, "Invalid input file: %s\n", in_file);
@@ -168,11 +167,9 @@ static int read_input_host(char *in_file, struct host_buffer_context *input)
 	size_t n = fread(input->buffer, sizeof(*(input->buffer)), input->length, fin);
 	fclose(fin);
 
-#ifdef DEBUG
-	printf("%s: read %d bytes from %s (%lu)\n", __func__, input->length, in_file, n);
-#endif
+	dbg_printf("%s: read %d bytes from %s (%lu)\n", __func__, input->length, in_file, n);
 
-   return (n != input->length);
+	return (n != input->length);
 }
 
 static void usage(const char* exe_name)
@@ -194,7 +191,7 @@ int main(int argc, char **argv)
 	int opt;
 	int use_dpu = 1;
 	int status;
-	int input_file_count = 0;
+	uint32_t input_file_count = 0;
 	char *search_term = NULL;
 	char **input_files = NULL;
 	struct host_buffer_context *input;
@@ -266,7 +263,6 @@ int main(int argc, char **argv)
 			input_files[input_file_count++] = argv[i + optind];
 	}
 
-	printf ("Input file count=%i\n", input_file_count);
 	if (input_file_count == 0)
 	{
 		usage(argv[0]);
@@ -297,13 +293,15 @@ int main(int argc, char **argv)
 	// Read each input file into main memory
 	uint32_t file_index=0;
 	uint32_t remaining_file_count = input_file_count;
+	dbg_printf("Input file count=%u\n", input_file_count);
 	while (remaining_file_count)
 	{
 		uint8_t prepared_file_count;
 		for (prepared_file_count = 0;
-			prepared_file_count < MAX(dpus_per_rank, remaining_file_count--);
+			prepared_file_count < MIN(dpus_per_rank, remaining_file_count);
 			prepared_file_count++)
 		{
+			dbg_printf("remaining file_count: %u\n", remaining_file_count);
 			// prepare an input buffer descriptor
 			input = malloc(sizeof(struct host_buffer_context) * dpus_per_rank);
 			input[prepared_file_count].buffer = NULL;
@@ -313,6 +311,8 @@ int main(int argc, char **argv)
 			// read the file into the descriptor
 			if (read_input_host(input_files[file_index++], &input[prepared_file_count]))
 				return 1;
+
+			remaining_file_count--;
 		}
 		dbg_printf("Prepared %u input descriptors\n", prepared_file_count);
 
