@@ -273,10 +273,6 @@ int main(int argc, char **argv)
 		return -1;
 	}
 
-#ifdef DEBUG
-	uint32_t dpu_index=0;
-#endif // DEBUG
-
 	uint32_t rank_count, dpu_count, dpus_per_rank;
 	if (use_dpu)
 	{
@@ -294,10 +290,7 @@ int main(int argc, char **argv)
 		dbg_printf("Got %u dpus across %u ranks (%u dpus per rank)\n", dpu_count, rank_count, dpus_per_rank);
 
 		DPU_FOREACH(dpus, dpu)
-		{
-			dbg_printf("Loading program to DPU %u\n", dpu_index++);
 			DPU_ASSERT(dpu_load(dpu, DPU_PROGRAM, NULL));
-		}
 	}
 
 
