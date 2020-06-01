@@ -50,7 +50,6 @@ int search_dpu(struct dpu_set_t *dpu, struct host_buffer_context *input, const c
 	uint32_t chunk_size = MAX(MIN_CHUNK_SIZE, ALIGN(input->length / NR_TASKLETS, 16));
 	//printf("chunk size: 0x%x\n", chunk_size);
 
-	DPU_ASSERT(dpu_load(*dpu, DPU_PROGRAM, NULL));
 
 	DPU_ASSERT(dpu_copy_to(*dpu, "input_length", 0, &input->length, sizeof(uint32_t)));
 	DPU_ASSERT(dpu_copy_to(*dpu, "input_buffer", 0, &input_buffer_start, sizeof(uint32_t)));
@@ -68,7 +67,7 @@ int search_dpu(struct dpu_set_t *dpu, struct host_buffer_context *input, const c
 	
 	if (dpu_launch(*dpu, DPU_ASYNCHRONOUS) != 0)
 	{
-		printf("DPU alloc failed\n");
+		printf("DPU launch failed\n");
 		return GREP_INVALID_INPUT;
 	}
 
@@ -202,6 +201,7 @@ int main(int argc, char **argv)
 	struct host_buffer_context output;
 	char pattern[MAX_PATTERN + 1];
 	struct grep_options opts;
+	struct dpu_set_t dpus, dpu;
 
 	memset(&opts, 0, sizeof(struct grep_options));
 
@@ -273,51 +273,64 @@ int main(int argc, char **argv)
 		return -1;
 	}
 
-	// Read each input file into main memory
-	for (int i=0; i < input_file_count; i++)
-	{
-		// prepare an input buffer descriptor
-		input = malloc(sizeof(struct host_buffer_context));
-		input->buffer = NULL;
-		input->length = 0;
-		input->max = MAX_INPUT_LENGTH;
+#ifdef DEBUG
+	uint32_t dpu_index=0;
+#endif // DEBUG
 
-		// read the file into the descriptor
-		if (read_input_host(input_files[i], input))
-			return 1;
+	uint32_t rank_count, dpu_count, dpus_per_rank;
+	if (use_dpu)
+	{
+		// allocate all of the DPUS up-front, then check to see how many we got
+		status = dpu_alloc(DPU_ALLOCATE_ALL, NULL, &dpus);
+		if (status != DPU_OK)
+		{
+			fprintf(stderr, "Error %i allocating DPUs\n", status);
+			return -3;
+		}
+
+		dpu_get_nr_ranks(dpus, &rank_count);
+		dpu_get_nr_dpus(dpus, &dpu_count);
+		dpus_per_rank = dpu_count/rank_count;
+		dbg_printf("Got %u dpus across %u ranks (%u dpus per rank)\n", dpu_count, rank_count, dpus_per_rank);
+
+		DPU_FOREACH(dpus, dpu)
+		{
+			dbg_printf("Loading program to DPU %u\n", dpu_index++);
+			DPU_ASSERT(dpu_load(dpu, DPU_PROGRAM, NULL));
+		}
+	}
+
+
+	// Read each input file into main memory
+	uint32_t file_index=0;
+	uint32_t remaining_file_count = input_file_count;
+	while (remaining_file_count)
+	{
+		uint8_t prepared_file_count;
+		for (prepared_file_count = 0;
+			prepared_file_count < MAX(dpus_per_rank, remaining_file_count--);
+			prepared_file_count++)
+		{
+			// prepare an input buffer descriptor
+			input = malloc(sizeof(struct host_buffer_context) * dpus_per_rank);
+			input[prepared_file_count].buffer = NULL;
+			input[prepared_file_count].length = 0;
+			input[prepared_file_count].max = MAX_INPUT_LENGTH;
+
+			// read the file into the descriptor
+			if (read_input_host(input_files[file_index++], &input[prepared_file_count]))
+				return 1;
+		}
+		dbg_printf("Prepared %u input descriptors\n", prepared_file_count);
 
 		if (use_dpu)
 		{
-			int dpu_index = NR_DPUS;
-
-			while (dpu_index == NR_DPUS)
+			// schedule full ranks, if we have enough remaining files
 			{
-				// find a free DPU, and pass it to the input descriptor
-				for (dpu_index=0; dpu_index < NR_DPUS; dpu_index++)
-				{
-					if (!working_dpus[dpu_index].input)
-					{
-						printf("DPU slot %i is free\n", dpu_index);
-						break;
-					}
-				}
-
-				if (dpu_index < NR_DPUS)
-				{
-					printf("Allocating DPU slot %i\n", dpu_index);
-					status = dpu_alloc(1, NULL, &working_dpus[dpu_index].dpus);
-					//ASSERT(dpus.kind == DPU_SET_RANKS);
-
-					// extract the single DPU and save it in our array
-					DPU_FOREACH(working_dpus[dpu_index].dpus, working_dpus[dpu_index].dpu)
-						break;
-					working_dpus[dpu_index].input = input;
-					status = search_dpu(&working_dpus[dpu_index].dpu, input, pattern, &opts);
-					used_dpus++;
-				}
+				//status = search_dpu(&working_dpus[dpu_index].dpu, input, pattern, &opts);
 
 				// check to see if anything has completed
-				completed_dpus(&output);
+				//completed_dpus(&output);
 			}
 
 			completed_dpus(&output);
@@ -326,8 +339,8 @@ int main(int argc, char **argv)
 
 	// all files have been submitted; wait for all jobs to finish
 	printf("Waiting for all DPUs to finish\n");
-	while (used_dpus)
-		completed_dpus(&output);
+
+	dpu_free(dpus);
 
 	if (status != GREP_OK)
 	{
