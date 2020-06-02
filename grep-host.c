@@ -2,6 +2,7 @@
 #include <dpu.h>
 #include <dpu_memory.h>
 #include <dpu_log.h>
+#include <dpu_management.h>
 #include <unistd.h>
 
 #include <string.h>
@@ -76,67 +77,47 @@ int search_dpu(struct dpu_set_t *dpu, struct host_buffer_context *input, const c
 	return GREP_OK;
 }
 
-int read_results_dpu(struct dpu_set_t *dpu, struct host_buffer_context *output)
+int read_results_dpu_rank(struct dpu_set_t dpu_rank, struct host_buffer_context *output)
 {
+	struct dpu_set_t dpu;
 	uint32_t line_count[NR_TASKLETS];
 	uint32_t match_count[NR_TASKLETS];
 
-	// Get the results back from the DPU 
-	//dpu_copy_from_mram(dpu.dpu, (unsigned char*)output->buffer, output_buffer_start, output->length, 0);
-	DPU_ASSERT(dpu_copy_from(*dpu, "line_count", 0, line_count, sizeof(uint32_t) * NR_TASKLETS));
-	DPU_ASSERT(dpu_copy_from(*dpu, "match_count", 0, match_count, sizeof(uint32_t) * NR_TASKLETS));
-
-	// aggregate the statistics
-	for (uint8_t i=0; i < NR_TASKLETS; i++)
+	DPU_ASSERT(dpu_rank.kind == DPU_SET_RANKS);
+	DPU_FOREACH(dpu_rank, dpu)
 	{
-		output->line_count += line_count[i];
-		output->match_count += match_count[i];
+
+		DPU_ASSERT(dpu_log_read(dpu, stdout));
+
+
+		// Get the results back from each individual DPU in the rank
+		//dpu_copy_from_mram(dpu.dpu, (unsigned char*)output->buffer, output_buffer_start, output->length, 0);
+		DPU_ASSERT(dpu_copy_from(dpu, "line_count", 0, line_count, sizeof(uint32_t) * NR_TASKLETS));
+		DPU_ASSERT(dpu_copy_from(dpu, "match_count", 0, match_count, sizeof(uint32_t) * NR_TASKLETS));
+
+		// aggregate the statistics
+		for (uint8_t i=0; i < NR_TASKLETS; i++)
+		{
+			output->line_count += line_count[i];
+			output->match_count += match_count[i];
+		}
 	}
 
 	return 0;
 }
 
-int completed_dpus(struct host_buffer_context *output)
+int read_status_dpu_rank(struct dpu_set_t dpu_rank)
 {
-	//struct dpu_set_t dpus;
-	//struct dpu_set_t dpu;
-	
-	//printf("Checking for completed\n");
-	for (uint8_t i=0; i < NR_DPUS; i++)
+	struct dpu_t *dpu;
+	DPU_ASSERT(dpu_rank.kind == DPU_SET_RANKS);
+	struct dpu_rank_t *rank = dpu_rank_from_set(dpu_rank);
+	STRUCT_DPU_FOREACH(rank, dpu)
 	{
-		bool done;
-		bool fault;
-		dpu_error_t status = -1;
-
-		if (!working_dpus[i].input)
-			continue;
-
-		printf("DPU %u is working\n", i);
-		status = dpu_status(working_dpus[i].dpu, &done, &fault);
-
-		if (status != DPU_OK)
-		{
-			printf("Error %u reading DPU %u status\n", status, i);
-			continue;
-		}
-
-		if (done)
-		{
-			read_results_dpu(&working_dpus[i].dpu, output);
-			printf("DPU %u is done\n", i);
-			DPU_ASSERT(dpu_log_read(working_dpus[i].dpu, stdout));
-
-			// Deallocate the DPUs
-			DPU_ASSERT(dpu_free(working_dpus[i].dpus));
-			working_dpus[i].input = 0;
-			used_dpus--;
-			return i;
-		}
+		printf("DPU slice id: %u member id: %u\n", dpu_get_slice_id(dpu), dpu_get_member_id(dpu));
 	}
 
-	return -1;
+	return 0;
 }
-
 
 /**
  * Read the contents of a file into an in-memory buffer. Upon success,
@@ -169,8 +150,6 @@ static int read_input_host(char *in_file, struct host_buffer_context *input)
 	input->curr = input->buffer;
 	size_t n = fread(input->buffer, sizeof(*(input->buffer)), input->length, fin);
 	fclose(fin);
-
-	//dbg_printf("read %lu bytes from %s\n", n, in_file);
 
 	return (n != input->length);
 }
@@ -348,20 +327,34 @@ int main(int argc, char **argv)
 
 			remaining_file_count--;
 		}
-		//dbg_printf("Prepared %u input descriptors\n", prepared_file_count);
+		dbg_printf("Prepared %u input descriptors\n", prepared_file_count);
 
-		if (use_dpu)
+		// schedule full ranks, if we have enough remaining files
+		DPU_RANK_FOREACH(dpus, dpu)
 		{
-			// schedule full ranks, if we have enough remaining files
+			uint32_t nr_dpus;
+			bool done, fault;
+
+			dpu_get_nr_dpus(dpu, &nr_dpus);
+			printf("There are %u dpus in this rank\n", nr_dpus);
+			DPU_ASSERT(dpu_status(dpu, &done, &fault));
+			if (fault)
 			{
-				//status = search_dpu(&working_dpus[dpu_index].dpu, input, pattern, &opts);
-
-				// check to see if anything has completed
-				//completed_dpus(&output);
+				printf("a DPU in set XXX has a fault\n");
 			}
+			if (done)
+			{
+				printf("all DPUs in set XXX are done\n");
+				read_results_dpu_rank(dpu, &output);
+			}
+			//status = search_dpu(&working_dpus[dpu_index].dpu, input, pattern, &opts);
 
-			completed_dpus(&output);
+			// check to see if anything has completed
+			//completed_dpus(&output);
+			read_status_dpu_rank(dpu);
 		}
+
+		//completed_dpus(&output);
 	}
 
 	// all files have been submitted; wait for all jobs to finish
