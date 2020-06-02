@@ -29,6 +29,7 @@ struct grep_options
 
 typedef struct host_buffer_context
 {
+	char *filename;
 	char *buffer;
 	char *curr;
 	uint32_t length;

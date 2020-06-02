@@ -3,6 +3,7 @@
 #include <dpu_memory.h>
 #include <dpu_log.h>
 #include <dpu_management.h>
+#include <dpu_runner.h>
 #include <unistd.h>
 
 #include <string.h>
@@ -32,13 +33,9 @@ const char options[]="dt:";
 // === from original 'grep' ===
 // === from original 'grep' ===
 
-/**
- * Prepare the DPU context by copying the input buffer to MRAM and
- * uploading the program to the DPU.
- */
-int search_dpu(struct dpu_set_t *dpu, struct host_buffer_context *input, const char* pattern, struct grep_options* opts)
+int search_dpu(struct dpu_set_t dpu, struct host_buffer_context *input, const char* pattern, struct grep_options* opts)
 {
-	printf("searching for pattern: %s\n", pattern);
+	printf("searching for pattern: %s in %s\n", pattern, input->filename);
 	// Set up and run the program on the DPU
 	uint32_t input_buffer_start = MEGABYTE(1);
 	//uint32_t output_buffer_start = ALIGN(input_buffer_start + input->length, 64);
@@ -53,21 +50,22 @@ int search_dpu(struct dpu_set_t *dpu, struct host_buffer_context *input, const c
 	//printf("chunk size: 0x%x\n", chunk_size);
 
 
-	DPU_ASSERT(dpu_copy_to(*dpu, "input_length", 0, &input->length, sizeof(uint32_t)));
-	DPU_ASSERT(dpu_copy_to(*dpu, "input_buffer", 0, &input_buffer_start, sizeof(uint32_t)));
-	DPU_ASSERT(dpu_copy_to(*dpu, "input_chunk_size", 0, &chunk_size, sizeof(uint32_t)));
-	//DPU_ASSERT(dpu_copy_to(*dpu, "output_length", 0, &output_length, sizeof(uint32_t)));
-	//DPU_ASSERT(dpu_copy_to(*dpu, "output_buffer", 0, &output_buffer_start, sizeof(uint32_t)));
-	DPU_ASSERT(dpu_copy_to(*dpu, "options", 0, opts, ALIGN(sizeof(struct grep_options), 8)));
-	DPU_ASSERT(dpu_copy_to(*dpu, "pattern_length", 0, &pattern_length, sizeof(uint32_t)));
-	DPU_ASSERT(dpu_copy_to(*dpu, "pattern", 0, pattern, ALIGN(pattern_length, 8)));
+	//DPU_ASSERT(dpu_load(dpu, DPU_PROGRAM, NULL));
+	DPU_ASSERT(dpu_copy_to(dpu, "input_length", 0, &input->length, sizeof(uint32_t)));
+	DPU_ASSERT(dpu_copy_to(dpu, "input_buffer", 0, &input_buffer_start, sizeof(uint32_t)));
+	DPU_ASSERT(dpu_copy_to(dpu, "input_chunk_size", 0, &chunk_size, sizeof(uint32_t)));
+	//DPU_ASSERT(dpu_copy_to(dpu, "output_length", 0, &output_length, sizeof(uint32_t)));
+	//DPU_ASSERT(dpu_copy_to(dpu, "output_buffer", 0, &output_buffer_start, sizeof(uint32_t)));
+	DPU_ASSERT(dpu_copy_to(dpu, "options", 0, opts, ALIGN(sizeof(struct grep_options), 8)));
+	DPU_ASSERT(dpu_copy_to(dpu, "pattern_length", 0, &pattern_length, sizeof(uint32_t)));
+	DPU_ASSERT(dpu_copy_to(dpu, "pattern", 0, pattern, ALIGN(pattern_length, 8)));
 
 	// dpu_copy_to_mram allows us to pass a variable size buffer to a variable
 	// location. That means it is more flexible, and we don't have to know the
 	// size of the input buffer ahead of time in the DPU program.
-	dpu_copy_to_mram(dpu->dpu, input_buffer_start, (unsigned char*)input->buffer, ALIGN(input->length, 8), 0);
+	dpu_copy_to_mram(dpu.dpu, input_buffer_start, (unsigned char*)input->buffer, ALIGN(input->length, 8), 0);
 	
-	if (dpu_launch(*dpu, DPU_ASYNCHRONOUS) != 0)
+	if (dpu_launch(dpu, DPU_ASYNCHRONOUS) != 0)
 	{
 		printf("DPU launch failed\n");
 		return GREP_INVALID_INPUT;
@@ -77,13 +75,28 @@ int search_dpu(struct dpu_set_t *dpu, struct host_buffer_context *input, const c
 	return GREP_OK;
 }
 
+int search_rank(struct dpu_rank_t *rank, struct host_buffer_context *input, 
+	uint8_t count, const char* pattern, struct grep_options* opts)
+{
+	struct dpu_set_t dpu, single;
+	printf("Got %u prepared files for this rank\n", count);
+	printf("searching for pattern: %s\n", pattern);
+	dpu = dpu_set_from_rank(&rank);
+	//for (int i=0; i < count; i++)
+	DPU_RANK_FOREACH(dpu, single)
+	{
+		search_dpu(single, &input[0], pattern, opts);
+	}
+	return 0;
+}
+
 int read_results_dpu_rank(struct dpu_set_t dpu_rank, struct host_buffer_context *output)
 {
 	struct dpu_set_t dpu;
 	uint32_t line_count[NR_TASKLETS];
 	uint32_t match_count[NR_TASKLETS];
 
-	DPU_ASSERT(dpu_rank.kind == DPU_SET_RANKS);
+	//DPU_ASSERT(dpu_rank.kind == DPU_SET_RANKS);
 	DPU_FOREACH(dpu_rank, dpu)
 	{
 
@@ -106,14 +119,12 @@ int read_results_dpu_rank(struct dpu_set_t dpu_rank, struct host_buffer_context 
 	return 0;
 }
 
-int read_status_dpu_rank(struct dpu_set_t dpu_rank)
+int read_status_dpu_rank(struct dpu_rank_t *rank)
 {
 	struct dpu_t *dpu;
-	DPU_ASSERT(dpu_rank.kind == DPU_SET_RANKS);
-	struct dpu_rank_t *rank = dpu_rank_from_set(dpu_rank);
 	STRUCT_DPU_FOREACH(rank, dpu)
 	{
-		printf("DPU slice id: %u member id: %u\n", dpu_get_slice_id(dpu), dpu_get_member_id(dpu));
+		//printf("DPU slice id: %u member id: %u\n", dpu_get_slice_id(dpu), dpu_get_member_id(dpu));
 	}
 
 	return 0;
@@ -136,6 +147,7 @@ static int read_input_host(char *in_file, struct host_buffer_context *input)
 		return 1;
 	}
 
+	input->filename = strdup(in_file);
 	stat(in_file, &st);
 	input->length = st.st_size;
 
@@ -254,7 +266,7 @@ int main(int argc, char **argv)
 			}
 			strtok(buff, "\r\n\t");
 			consumed = strlen(buff) + 1;
-			dbg_printf("filename: %s (%u)\n", buff, consumed);
+			//dbg_printf("filename: %s (%u)\n", buff, consumed);
 			if (stat(buff, &st) == 0 && S_ISREG(st.st_mode))
 				input_files[input_file_count++] = strdup(buff);
 			// scootch the remaining bytes forward in tmp
@@ -307,18 +319,21 @@ int main(int argc, char **argv)
 	uint32_t file_index=0;
 	uint32_t remaining_file_count = input_file_count;
 	dbg_printf("Input file count=%u\n", input_file_count);
+	input = malloc(sizeof(struct host_buffer_context) * dpus_per_rank);
 	while (remaining_file_count)
 	{
 		uint8_t prepared_file_count;
+		uint8_t files_to_prepare = MIN(dpus_per_rank, remaining_file_count);
+		dbg_printf("Preparing %u files\n", files_to_prepare);
 		for (prepared_file_count = 0;
-			prepared_file_count < MIN(dpus_per_rank, remaining_file_count);
+			prepared_file_count < files_to_prepare;
 			prepared_file_count++)
 		{
 			//dbg_printf("remaining file_count: %u\n", remaining_file_count);
 			// prepare an input buffer descriptor
-			input = malloc(sizeof(struct host_buffer_context) * dpus_per_rank);
 			input[prepared_file_count].buffer = NULL;
 			input[prepared_file_count].length = 0;
+			input[prepared_file_count].filename = 0;
 			input[prepared_file_count].max = MAX_INPUT_LENGTH;
 
 			// read the file into the descriptor
@@ -328,30 +343,47 @@ int main(int argc, char **argv)
 			remaining_file_count--;
 		}
 		dbg_printf("Prepared %u input descriptors\n", prepared_file_count);
+		dbg_printf("First file: %s\n", input[0].filename);
 
 		// schedule full ranks, if we have enough remaining files
+		uint8_t running, fault;
+		uint32_t rank_id=0;
 		DPU_RANK_FOREACH(dpus, dpu)
 		{
 			uint32_t nr_dpus;
-			bool done, fault;
-
-			dpu_get_nr_dpus(dpu, &nr_dpus);
-			printf("There are %u dpus in this rank\n", nr_dpus);
-			DPU_ASSERT(dpu_status(dpu, &done, &fault));
-			if (fault)
-			{
-				printf("a DPU in set XXX has a fault\n");
-			}
-			if (done)
-			{
-				printf("all DPUs in set XXX are done\n");
-				read_results_dpu_rank(dpu, &output);
-			}
-			//status = search_dpu(&working_dpus[dpu_index].dpu, input, pattern, &opts);
 
 			// check to see if anything has completed
-			//completed_dpus(&output);
-			read_status_dpu_rank(dpu);
+/*
+			bool done, fault;
+			dpu_status(dpu, &done, &fault);
+			if (done)
+			{
+				printf("Rank done\n");
+			}
+			if (fault)
+			{
+				printf("rank fault\n");
+			}
+*/
+			dpu_get_nr_dpus(dpu, &nr_dpus);
+			struct dpu_rank_t *rank = dpu_rank_from_set(dpu);
+			dpu_poll_rank(rank, &running, &fault);
+			if (fault)
+				printf("Faulty DPUs: 0x%x\n", fault);
+			if (running)
+				printf("Running DPUs: 0x%x\n", running);
+			else
+			{
+				printf("Rank %u is idle - using\n", rank_id);
+				search_rank(rank, input, prepared_file_count, pattern, &opts);
+				break;
+			}
+			//dpu_description_t descrip = dpu_get_description(rank);
+			//dbg_printf("There are %u dpus in this rank\n", nr_dpus);
+			//read_status_dpu_rank(rank);
+
+			//status = search_dpu(&working_dpus[dpu_index].dpu, input, pattern, &opts);
+			rank_id++;
 		}
 
 		//completed_dpus(&output);
