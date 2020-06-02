@@ -1,10 +1,10 @@
+#define _DEFAULT_SOURCE // needed for S_ISREG() and strdup
 #include <dpu.h>
 #include <dpu_memory.h>
 #include <dpu_log.h>
-#include <stdint.h>
-#include <stdio.h>
+#include <unistd.h>
 
-#define _BSD_SOURCE // needed for S_ISREG()
+#include <string.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <getopt.h>
@@ -16,6 +16,7 @@
 #define MAX_OUTPUT_LENGTH MEGABYTE(32)
 #define MIN_CHUNK_SIZE 128 // not worthwhile making another tasklet work for data less than this
 #define MAX_PATTERN 63
+#define TEMP_LENGTH 256
 
 struct {
 	struct dpu_set_t dpu;
@@ -146,17 +147,19 @@ int completed_dpus(struct host_buffer_context *output)
  */
 static int read_input_host(char *in_file, struct host_buffer_context *input)
 {
+	struct stat st;
+
 	FILE *fin = fopen(in_file, "r");
 	if (fin == NULL) {
 		fprintf(stderr, "Invalid input file: %s\n", in_file);
 		return 1;
 	}
 
-	fseek(fin, 0, SEEK_END);
-	input->length = ftell(fin);
-	fseek(fin, 0, SEEK_SET);
+	stat(in_file, &st);
+	input->length = st.st_size;
 
-	if (input->length > input->max) {
+	if (input->length > input->max)
+	{
 		fprintf(stderr, "input_size is too big (%d > %d)\n",
 				input->length, input->max);
 		return 1;
@@ -167,7 +170,7 @@ static int read_input_host(char *in_file, struct host_buffer_context *input)
 	size_t n = fread(input->buffer, sizeof(*(input->buffer)), input->length, fin);
 	fclose(fin);
 
-	dbg_printf("%s: read %d bytes from %s (%lu)\n", __func__, input->length, in_file, n);
+	//dbg_printf("read %lu bytes from %s\n", n, in_file);
 
 	return (n != input->length);
 }
@@ -192,6 +195,7 @@ int main(int argc, char **argv)
 	int use_dpu = 1;
 	int status;
 	uint32_t input_file_count = 0;
+	uint32_t allocated_count = 0;
 	char *search_term = NULL;
 	char **input_files = NULL;
 	struct host_buffer_context *input;
@@ -254,15 +258,43 @@ int main(int argc, char **argv)
 	// at this point, all the rest of the arguments are files to search through
 	int remain_arg_count = argc - optind;
 
-	input_files = malloc(sizeof(char*) * remain_arg_count);
-	for (int i=0; i < remain_arg_count; i++)
+	if (remain_arg_count && strcmp(argv[optind], "-") == 0)
 	{
-		struct stat s;
-		char *next = argv[i + optind];
-		if (stat(next, &s) == 0 && S_ISREG(s.st_mode))
-			input_files[input_file_count++] = argv[i + optind];
+		int consumed = TEMP_LENGTH;
+		char buff[TEMP_LENGTH];
+		allocated_count = 1;
+		input_files = malloc(sizeof(char*) * allocated_count);
+		while(fread(buff + TEMP_LENGTH - consumed, consumed, 1, stdin) > 0)
+		{
+			struct stat st;
+			// see if we need more space for file names
+			if (input_file_count == allocated_count)
+			{
+				allocated_count <<= 1;
+				input_files = realloc(input_files, sizeof(char*) * allocated_count);
+			}
+			strtok(buff, "\r\n\t");
+			consumed = strlen(buff) + 1;
+			dbg_printf("filename: %s (%u)\n", buff, consumed);
+			if (stat(buff, &st) == 0 && S_ISREG(st.st_mode))
+				input_files[input_file_count++] = strdup(buff);
+			// scootch the remaining bytes forward in tmp
+			memmove(buff, buff + consumed, TEMP_LENGTH - consumed);
+		}
+	}
+	else
+	{
+		input_files = malloc(sizeof(char*) * remain_arg_count);
+		for (int i=0; i < remain_arg_count; i++)
+		{
+			struct stat s;
+			char *next = argv[i + optind];
+			if (stat(next, &s) == 0 && S_ISREG(s.st_mode))
+				input_files[input_file_count++] = argv[i + optind];
+		}
 	}
 
+	// if there are no input files, we have no work to do!
 	if (input_file_count == 0)
 	{
 		usage(argv[0]);
@@ -287,8 +319,10 @@ int main(int argc, char **argv)
 
 		DPU_FOREACH(dpus, dpu)
 			DPU_ASSERT(dpu_load(dpu, DPU_PROGRAM, NULL));
-	}
 
+		if (input_file_count < dpu_count)
+			printf("Warning: fewer input files than DPUs (%u < %u)\n", input_file_count, dpu_count);
+	}
 
 	// Read each input file into main memory
 	uint32_t file_index=0;
@@ -301,7 +335,7 @@ int main(int argc, char **argv)
 			prepared_file_count < MIN(dpus_per_rank, remaining_file_count);
 			prepared_file_count++)
 		{
-			dbg_printf("remaining file_count: %u\n", remaining_file_count);
+			//dbg_printf("remaining file_count: %u\n", remaining_file_count);
 			// prepare an input buffer descriptor
 			input = malloc(sizeof(struct host_buffer_context) * dpus_per_rank);
 			input[prepared_file_count].buffer = NULL;
@@ -314,7 +348,7 @@ int main(int argc, char **argv)
 
 			remaining_file_count--;
 		}
-		dbg_printf("Prepared %u input descriptors\n", prepared_file_count);
+		//dbg_printf("Prepared %u input descriptors\n", prepared_file_count);
 
 		if (use_dpu)
 		{
