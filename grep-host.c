@@ -21,17 +21,12 @@
 #define TEMP_LENGTH 256
 
 struct {
-	struct dpu_set_t dpu;
-	struct dpu_set_t dpus;
 	struct host_buffer_context *input;
 } working_dpus[NR_DPUS];
 
 int used_dpus;
 
 const char options[]="dt:";
-
-// === from original 'grep' ===
-// === from original 'grep' ===
 
 int search_dpu(struct dpu_set_t dpu, struct host_buffer_context *input, const char* pattern, struct grep_options* opts)
 {
@@ -47,10 +42,8 @@ int search_dpu(struct dpu_set_t dpu, struct host_buffer_context *input, const ch
 	//	input_buffer_start, input->length, output_buffer_start, output_length);
 
 	uint32_t chunk_size = MAX(MIN_CHUNK_SIZE, ALIGN(input->length / NR_TASKLETS, 16));
-	//printf("chunk size: 0x%x\n", chunk_size);
+	//dbg_printf("chunk size: 0x%x\n", chunk_size);
 
-
-	//DPU_ASSERT(dpu_load(dpu, DPU_PROGRAM, NULL));
 	DPU_ASSERT(dpu_copy_to(dpu, "input_length", 0, &input->length, sizeof(uint32_t)));
 	DPU_ASSERT(dpu_copy_to(dpu, "input_buffer", 0, &input_buffer_start, sizeof(uint32_t)));
 	DPU_ASSERT(dpu_copy_to(dpu, "input_chunk_size", 0, &chunk_size, sizeof(uint32_t)));
@@ -63,15 +56,12 @@ int search_dpu(struct dpu_set_t dpu, struct host_buffer_context *input, const ch
 	// dpu_copy_to_mram allows us to pass a variable size buffer to a variable
 	// location. That means it is more flexible, and we don't have to know the
 	// size of the input buffer ahead of time in the DPU program.
-	dpu_copy_to_mram(dpu.dpu, input_buffer_start, (unsigned char*)input->buffer, ALIGN(input->length, 8), 0);
-	
 	if (dpu_launch(dpu, DPU_ASYNCHRONOUS) != 0)
 	{
 		printf("DPU launch failed\n");
 		return GREP_INVALID_INPUT;
 	}
 
-	printf("Search started\n");
 	return GREP_OK;
 }
 
@@ -114,17 +104,6 @@ int read_results_dpu_rank(struct dpu_set_t dpu_rank, struct host_buffer_context 
 			output->line_count += line_count[i];
 			output->match_count += match_count[i];
 		}
-	}
-
-	return 0;
-}
-
-int read_status_dpu_rank(struct dpu_rank_t *rank)
-{
-	struct dpu_t *dpu;
-	STRUCT_DPU_FOREACH(rank, dpu)
-	{
-		//printf("DPU slice id: %u member id: %u\n", dpu_get_slice_id(dpu), dpu_get_member_id(dpu));
 	}
 
 	return 0;
@@ -308,12 +287,14 @@ int main(int argc, char **argv)
 		dpus_per_rank = dpu_count/rank_count;
 		dbg_printf("Got %u dpus across %u ranks (%u dpus per rank)\n", dpu_count, rank_count, dpus_per_rank);
 
-		DPU_FOREACH(dpus, dpu)
-			DPU_ASSERT(dpu_load(dpu, DPU_PROGRAM, NULL));
+		DPU_ASSERT(dpu_load(dpus, DPU_PROGRAM, NULL));
 
 		if (input_file_count < dpu_count)
 			printf("Warning: fewer input files than DPUs (%u < %u)\n", input_file_count, dpu_count);
 	}
+
+	uint32_t rank_status=0; // bitmap indicating if the rank is busy or free
+	uint32_t submitted;
 
 	// Read each input file into main memory
 	uint32_t file_index=0;
@@ -324,12 +305,11 @@ int main(int argc, char **argv)
 	{
 		uint8_t prepared_file_count;
 		uint8_t files_to_prepare = MIN(dpus_per_rank, remaining_file_count);
-		dbg_printf("Preparing %u files\n", files_to_prepare);
+		dbg_printf("remaining file_count: %u\n", remaining_file_count);
 		for (prepared_file_count = 0;
 			prepared_file_count < files_to_prepare;
 			prepared_file_count++)
 		{
-			//dbg_printf("remaining file_count: %u\n", remaining_file_count);
 			// prepare an input buffer descriptor
 			input[prepared_file_count].buffer = NULL;
 			input[prepared_file_count].length = 0;
@@ -342,56 +322,91 @@ int main(int argc, char **argv)
 
 			remaining_file_count--;
 		}
-		dbg_printf("Prepared %u input descriptors\n", prepared_file_count);
-		dbg_printf("First file: %s\n", input[0].filename);
+		//dbg_printf("Prepared %u input descriptors\n", prepared_file_count);
+		submitted = 0;
 
 		// schedule full ranks, if we have enough remaining files
-		uint8_t running, fault;
 		uint32_t rank_id=0;
-		DPU_RANK_FOREACH(dpus, dpu)
+		struct host_buffer_context output;
+
+		dbg_printf("Checking for completed ranks\n");
+		while (!submitted)
 		{
-			uint32_t nr_dpus;
+			rank_id=0;
+			DPU_RANK_FOREACH(dpus, dpu)
+			{
+				bool done, fault;
 
-			// check to see if anything has completed
-/*
-			bool done, fault;
-			dpu_status(dpu, &done, &fault);
-			if (done)
-			{
-				printf("Rank done\n");
+				if (rank_status & (1<<rank_id))
+				{
+					// check to see if anything has completed
+					dpu_status(dpu, &done, &fault);
+					if (done)
+					{
+						rank_status &= ~(1<<rank_id);
+						printf("Rank %u done status=0x%x\n", rank_id, rank_status);
+						read_results_dpu_rank(dpu, &output);
+					}
+					if (fault)
+					{
+						printf("rank %u fault - abort!\n", rank_id);
+						goto done;
+					}
+				}
+				rank_id++;
 			}
-			if (fault)
-			{
-				printf("rank fault\n");
-			}
-*/
-			dpu_get_nr_dpus(dpu, &nr_dpus);
-			struct dpu_rank_t *rank = dpu_rank_from_set(dpu);
-			dpu_poll_rank(rank, &running, &fault);
-			if (fault)
-				printf("Faulty DPUs: 0x%x\n", fault);
-			if (running)
-				printf("Running DPUs: 0x%x\n", running);
-			else
-			{
-				printf("Rank %u is idle - using\n", rank_id);
-				search_rank(rank, input, prepared_file_count, pattern, &opts);
-				break;
-			}
-			//dpu_description_t descrip = dpu_get_description(rank);
-			//dbg_printf("There are %u dpus in this rank\n", nr_dpus);
-			//read_status_dpu_rank(rank);
+			usleep(1);
 
-			//status = search_dpu(&working_dpus[dpu_index].dpu, input, pattern, &opts);
-			rank_id++;
+			//dbg_printf("Submitting new jobs\n");
+			rank_id=0;
+			DPU_RANK_FOREACH(dpus, dpu)
+			{
+				if (!(rank_status & (1<<rank_id)))
+				{
+					rank_status |= (1<<rank_id);
+					printf("Rank %u starting status=0x%x\n", rank_id, rank_status);
+					status = search_dpu(dpu, input, pattern, &opts);
+					submitted = 1;
+					break;
+				}
+				rank_id++;
+			}
 		}
 
-		//completed_dpus(&output);
+		dbg_printf("Checking for completed ranks status=0x%x\n", rank_status);
+		while (rank_status)
+		{
+			rank_id=0;
+			DPU_RANK_FOREACH(dpus, dpu)
+			{
+				bool done, fault;
+
+				if (rank_status & (1<<rank_id))
+				{
+					// check to see if anything has completed
+					dpu_status(dpu, &done, &fault);
+					if (done)
+					{
+						rank_status &= ~(1<<rank_id);
+						printf("Rank %u done status=0x%x\n", rank_id, rank_status);
+						read_results_dpu_rank(dpu, &output);
+					}
+					if (fault)
+					{
+						printf("rank %u fault - aborting\n", rank_id);
+						goto done;
+					}
+				}
+				rank_id++;
+			}
+			usleep(1);
+		}
 	}
 
 	// all files have been submitted; wait for all jobs to finish
 	printf("Waiting for all DPUs to finish\n");
 
+done:
 	dpu_free(dpus);
 
 	if (status != GREP_OK)
