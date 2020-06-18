@@ -265,6 +265,9 @@ int main(int argc, char **argv)
 		return -1;
 	}
 
+	uint8_t rank_id;
+	uint64_t rank_status=0; // bitmap indicating if the rank is busy or free
+	uint32_t submitted;
 	uint32_t rank_count, dpu_count, dpus_per_rank;
 	if (use_dpu)
 	{
@@ -283,23 +286,29 @@ int main(int argc, char **argv)
 
 		DPU_ASSERT(dpu_load(dpus, DPU_PROGRAM, NULL));
 
+		if (rank_count > 64)
+		{
+			printf("Error: too many ranks for a 64-bit bitmask!\n");
+			return -4;
+		}
 		if (input_file_count < dpu_count)
 			printf("Warning: fewer input files than DPUs (%u < %u)\n", input_file_count, dpu_count);
 	}
-
-	uint32_t rank_status=0; // bitmap indicating if the rank is busy or free
-	uint32_t submitted;
 
 	// Read each input file into main memory
 	uint32_t file_index=0;
 	uint32_t remaining_file_count = input_file_count;
 	dbg_printf("Input file count=%u\n", input_file_count);
 	input = malloc(sizeof(struct host_buffer_context) * dpus_per_rank);
+
+	// as long as there are still files to process
 	while (remaining_file_count)
 	{
 		uint8_t prepared_file_count;
 		uint8_t files_to_prepare = MIN(dpus_per_rank, remaining_file_count);
 		dbg_printf("remaining file_count: %u\n", remaining_file_count);
+
+		// prepare enough files to fill the rank
 		for (prepared_file_count = 0;
 			prepared_file_count < files_to_prepare;
 			prepared_file_count++)
@@ -316,29 +325,44 @@ int main(int argc, char **argv)
 
 			remaining_file_count--;
 		}
-		//dbg_printf("Prepared %u input descriptors\n", prepared_file_count);
+		dbg_printf("Prepared %u input descriptors\n", prepared_file_count);
 		submitted = 0;
-
-		// schedule full ranks, if we have enough remaining files
-		uint32_t rank_id=0;
-		struct host_buffer_context output;
-
-		dbg_printf("Checking for completed ranks\n");
 		while (!submitted)
 		{
-			rank_id=0;
+			// submit those files to a free rank
+			struct host_buffer_context output;
+			rank_id = 0;
+			DPU_RANK_FOREACH(dpus, dpu)
+			{
+				if (!(rank_status & ((uint64_t)1<<rank_id)))
+				{
+					rank_status |= ((uint64_t)1<<rank_id);
+					printf("Submitted to rank %u status=0x%lx\n", rank_id, rank_status);
+					status = search_dpu(dpu, input, pattern, &opts);
+					submitted = 1;
+					break;
+				}
+				rank_id++;
+			}
+
+			// as long as we have submitted some files, don't look for finished DPUs
+			if (submitted)
+				break;
+
+			rank_id = 0;
+			dbg_printf("Checking for completed ranks starting with %u\n", rank_id);
 			DPU_RANK_FOREACH(dpus, dpu)
 			{
 				bool done, fault;
 
-				if (rank_status & (1<<rank_id))
+				if (rank_status & ((uint64_t)1<<rank_id))
 				{
 					// check to see if anything has completed
 					dpu_status(dpu, &done, &fault);
 					if (done)
 					{
-						rank_status &= ~(1<<rank_id);
-						printf("Rank %u done status=0x%x\n", rank_id, rank_status);
+						rank_status &= ~((uint64_t)1<<rank_id);
+						printf("Rank %u done status=0x%lx\n", rank_id, rank_status);
 						read_results_dpu_rank(dpu, &output);
 					}
 					if (fault)
@@ -349,56 +373,39 @@ int main(int argc, char **argv)
 				}
 				rank_id++;
 			}
-			usleep(1);
-
-			//dbg_printf("Submitting new jobs\n");
-			rank_id=0;
-			DPU_RANK_FOREACH(dpus, dpu)
-			{
-				if (!(rank_status & (1<<rank_id)))
-				{
-					rank_status |= (1<<rank_id);
-					printf("Rank %u starting status=0x%x\n", rank_id, rank_status);
-					status = search_dpu(dpu, input, pattern, &opts);
-					submitted = 1;
-					break;
-				}
-				rank_id++;
-			}
-		}
-
-		dbg_printf("Checking for completed ranks status=0x%x\n", rank_status);
-		while (rank_status)
-		{
-			rank_id=0;
-			DPU_RANK_FOREACH(dpus, dpu)
-			{
-				bool done, fault;
-
-				if (rank_status & (1<<rank_id))
-				{
-					// check to see if anything has completed
-					dpu_status(dpu, &done, &fault);
-					if (done)
-					{
-						rank_status &= ~(1<<rank_id);
-						printf("Rank %u done status=0x%x\n", rank_id, rank_status);
-						read_results_dpu_rank(dpu, &output);
-					}
-					if (fault)
-					{
-						printf("rank %u fault - aborting\n", rank_id);
-						goto done;
-					}
-				}
-				rank_id++;
-			}
-			usleep(1);
 		}
 	}
 
 	// all files have been submitted; wait for all jobs to finish
-	printf("Waiting for all DPUs to finish\n");
+	dbg_printf("Waiting for all DPUs to finish\n");
+	while (rank_status)
+	{
+		dbg_printf("Checking for completed ranks status=0x%lx\n", rank_status);
+		rank_id = 0;
+		DPU_RANK_FOREACH(dpus, dpu)
+		{
+			bool done, fault;
+
+			if (rank_status & ((uint64_t)1<<rank_id))
+			{
+				// check to see if anything has completed
+				dpu_status(dpu, &done, &fault);
+				if (done)
+				{
+					rank_status &= ~((uint64_t)1<<rank_id);
+					printf("Rank %u done status=0x%lx\n", rank_id, rank_status);
+					read_results_dpu_rank(dpu, &output);
+				}
+				if (fault)
+				{
+					printf("rank %u fault - aborting\n", rank_id);
+					goto done;
+				}
+			}
+			rank_id++;
+		}
+		usleep(1);
+	}
 
 done:
 	dpu_free(dpus);
