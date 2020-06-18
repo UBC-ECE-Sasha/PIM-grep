@@ -20,12 +20,6 @@
 #define MAX_PATTERN 63
 #define TEMP_LENGTH 256
 
-struct {
-	struct host_buffer_context *input;
-} working_dpus[NR_DPUS];
-
-int used_dpus;
-
 const char options[]="dt:";
 
 int search_dpu(struct dpu_set_t dpu, struct host_buffer_context *input, const char* pattern, struct grep_options* opts)
