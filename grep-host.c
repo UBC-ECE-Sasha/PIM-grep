@@ -16,7 +16,7 @@
 #define DPU_PROGRAM "dpu-grep/grep.dpu"
 #define MAX_INPUT_LENGTH MEGABYTE(32)
 #define MAX_OUTPUT_LENGTH MEGABYTE(32)
-#define MIN_CHUNK_SIZE 128 // not worthwhile making another tasklet work for data less than this
+#define MIN_CHUNK_SIZE 256 // not worthwhile making another tasklet work for data less than this
 #define MAX_PATTERN 63
 #define TEMP_LENGTH 256
 
@@ -29,6 +29,7 @@ int search_dpu(struct dpu_set_t dpu, struct host_buffer_context *input, const ch
 	uint32_t input_buffer_start = MEGABYTE(1);
 	//uint32_t output_buffer_start = ALIGN(input_buffer_start + input->length, 64);
 	uint32_t pattern_length = strlen(pattern);
+	uint32_t input_length = 0x1234;//input->length;
 
 	// Must be a multiple of 8 to ensure the last write to MRAM is also a multiple of 8
 	//uint32_t output_length = ALIGN(MEGABYTE(64) - output_buffer_start, 8);
@@ -38,18 +39,26 @@ int search_dpu(struct dpu_set_t dpu, struct host_buffer_context *input, const ch
 	uint32_t chunk_size = MAX(MIN_CHUNK_SIZE, ALIGN(input->length / NR_TASKLETS, 16));
 	//dbg_printf("chunk size: 0x%x\n", chunk_size);
 
-	DPU_ASSERT(dpu_copy_to(dpu, "input_length", 0, &input->length, sizeof(uint32_t)));
-	DPU_ASSERT(dpu_copy_to(dpu, "input_buffer", 0, &input_buffer_start, sizeof(uint32_t)));
-	DPU_ASSERT(dpu_copy_to(dpu, "input_chunk_size", 0, &chunk_size, sizeof(uint32_t)));
+	dbg_printf("input_length: %u\n", input_length);
+	dbg_printf("input_buffer: %u\n", input_buffer_start);
+	dbg_printf("input_chunk_size: %u\n", chunk_size);
+	dbg_printf("pattern_length: %u\n", pattern_length);
+	dbg_printf("pattern: %s @%p size=%u\n", pattern, pattern, ALIGN(pattern_length, 4));
+
+	DPU_ASSERT(dpu_copy_to(dpu, "input_length", 0, &input_length, sizeof(uint32_t)));
+//	DPU_ASSERT(dpu_copy_to(dpu, "input_buffer", 0, &input_buffer_start, sizeof(uint32_t)));
+//	DPU_ASSERT(dpu_copy_to(dpu, "input_chunk_size", 0, &chunk_size, sizeof(uint32_t)));
 	//DPU_ASSERT(dpu_copy_to(dpu, "output_length", 0, &output_length, sizeof(uint32_t)));
 	//DPU_ASSERT(dpu_copy_to(dpu, "output_buffer", 0, &output_buffer_start, sizeof(uint32_t)));
-	DPU_ASSERT(dpu_copy_to(dpu, "options", 0, opts, ALIGN(sizeof(struct grep_options), 8)));
+//	DPU_ASSERT(dpu_copy_to(dpu, "options", 0, opts, ALIGN(sizeof(struct grep_options), 4)));
 	DPU_ASSERT(dpu_copy_to(dpu, "pattern_length", 0, &pattern_length, sizeof(uint32_t)));
-	DPU_ASSERT(dpu_copy_to(dpu, "pattern", 0, pattern, ALIGN(pattern_length, 8)));
+//	DPU_ASSERT(dpu_copy_to(dpu, "pattern", 0, pattern, ALIGN(pattern_length, 8)));
 
 	// dpu_copy_to_mram allows us to pass a variable size buffer to a variable
 	// location. That means it is more flexible, and we don't have to know the
 	// size of the input buffer ahead of time in the DPU program.
+	//DPU_ASSERT(dpu_copy_to_mram(dpu.dpu, input_buffer_start, input->curr, ALIGN(input->length, 8), 0));
+
 	if (dpu_launch(dpu, DPU_ASYNCHRONOUS) != 0)
 	{
 		printf("DPU launch failed\n");
@@ -59,17 +68,21 @@ int search_dpu(struct dpu_set_t dpu, struct host_buffer_context *input, const ch
 	return GREP_OK;
 }
 
-int search_rank(struct dpu_rank_t *rank, struct host_buffer_context *input, 
+int search_rank(struct dpu_set_t rank, uint8_t rank_id, struct host_buffer_context *input, 
 	uint8_t count, const char* pattern, struct grep_options* opts)
 {
-	struct dpu_set_t dpu, single;
-	printf("Got %u prepared files for this rank\n", count);
-	printf("searching for pattern: %s\n", pattern);
-	dpu = dpu_set_from_rank(&rank);
-	//for (int i=0; i < count; i++)
-	DPU_RANK_FOREACH(dpu, single)
+	struct dpu_set_t dpu;
+	uint32_t dpu_id=0; // the id of the DPU inside the rank (0-63)
+
+	DPU_FOREACH(rank, dpu)
 	{
-		search_dpu(single, &input[0], pattern, opts);
+		if (dpu_id < count)
+		{
+			DPU_ASSERT(dpu_copy_to(dpu, "dpu_id", 0, &dpu_id, sizeof(uint32_t)));
+			dbg_printf("[%x:%x] starting\n", rank_id, dpu_id);
+			search_dpu(dpu, &input[dpu_id], pattern, opts);
+		}
+		dpu_id++;
 	}
 	return 0;
 }
@@ -166,7 +179,7 @@ int main(int argc, char **argv)
 	struct host_buffer_context output;
 	char pattern[MAX_PATTERN + 1];
 	struct grep_options opts;
-	struct dpu_set_t dpus, dpu;
+	struct dpu_set_t dpus, dpu_rank;
 
 	memset(&opts, 0, sizeof(struct grep_options));
 
@@ -332,13 +345,13 @@ int main(int argc, char **argv)
 			// submit those files to a free rank
 			struct host_buffer_context output;
 			rank_id = 0;
-			DPU_RANK_FOREACH(dpus, dpu)
+			DPU_RANK_FOREACH(dpus, dpu_rank)
 			{
 				if (!(rank_status & ((uint64_t)1<<rank_id)))
 				{
 					rank_status |= ((uint64_t)1<<rank_id);
 					printf("Submitted to rank %u status=0x%lx\n", rank_id, rank_status);
-					status = search_dpu(dpu, input, pattern, &opts);
+					status = search_rank(dpu_rank, rank_id, input, prepared_file_count, pattern, &opts);
 					submitted = 1;
 					break;
 				}
@@ -351,19 +364,19 @@ int main(int argc, char **argv)
 
 			rank_id = 0;
 			dbg_printf("Checking for completed ranks starting with %u\n", rank_id);
-			DPU_RANK_FOREACH(dpus, dpu)
+			DPU_RANK_FOREACH(dpus, dpu_rank)
 			{
 				bool done, fault;
 
 				if (rank_status & ((uint64_t)1<<rank_id))
 				{
 					// check to see if anything has completed
-					dpu_status(dpu, &done, &fault);
+					dpu_status(dpu_rank, &done, &fault);
 					if (done)
 					{
 						rank_status &= ~((uint64_t)1<<rank_id);
 						printf("Rank %u done status=0x%lx\n", rank_id, rank_status);
-						read_results_dpu_rank(dpu, &output);
+						read_results_dpu_rank(dpu_rank, &output);
 					}
 					if (fault)
 					{
@@ -382,19 +395,19 @@ int main(int argc, char **argv)
 	{
 		dbg_printf("Checking for completed ranks status=0x%lx\n", rank_status);
 		rank_id = 0;
-		DPU_RANK_FOREACH(dpus, dpu)
+		DPU_RANK_FOREACH(dpus, dpu_rank)
 		{
 			bool done, fault;
 
 			if (rank_status & ((uint64_t)1<<rank_id))
 			{
 				// check to see if anything has completed
-				dpu_status(dpu, &done, &fault);
+				dpu_status(dpu_rank, &done, &fault);
 				if (done)
 				{
 					rank_status &= ~((uint64_t)1<<rank_id);
 					printf("Rank %u done status=0x%lx\n", rank_id, rank_status);
-					read_results_dpu_rank(dpu, &output);
+					read_results_dpu_rank(dpu_rank, &output);
 				}
 				if (fault)
 				{
