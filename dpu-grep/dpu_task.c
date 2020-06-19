@@ -7,14 +7,18 @@
 #include <string.h>
 
 // WRAM variables
+//__host uint32_t dpu_id __attribute__ ((aligned (8)));
+//__host uint32_t input_length __attribute__ ((aligned (8)));
+//__host uint32_t input_chunk_size __attribute__ ((aligned (8)));
+//__host uint32_t pattern_length __attribute__ ((aligned (8)));
+//__host uint32_t line_count[NR_TASKLETS] __attribute__ ((aligned (8)));
+//__host uint32_t match_count[NR_TASKLETS] __attribute__ ((aligned (8)));
+//__host struct grep_options options;
 __host uint32_t dpu_id;
-__host uint32_t input_length __attribute__ ((aligned (8)));
+__host uint32_t input_length;
 __host uint32_t input_chunk_size;
 __host uint32_t pattern_length;
-__host uint32_t line_count[NR_TASKLETS];
-__host uint32_t match_count[NR_TASKLETS];
-__host struct grep_options options;
-__host char pattern[64] __attribute__ ((aligned (8)));
+__host char pattern[64];
 
 
 // MRAM variables
@@ -22,37 +26,39 @@ __host __mram_ptr char* input_buffer;
 
 int main()
 {
-	struct in_buffer_context chunk;
+//	struct in_buffer_context chunk;
 	uint8_t task_id = me();
-	char sample[11];
+//	char sample[11];
 
-	//dbg_printf("[%u:%u]: input length: %u\n", dpu_id, task_id, input_length);
-	dbg_printf("[%u:%u]: pattern length: %u\n", dpu_id, task_id, pattern_length);
-	dbg_printf("[%u:%u]: pattern: %s\n", dpu_id, task_id, pattern);
+	//dbg_printf("Sequential reader buffer size: %u\n", SEQREAD_CACHE_SIZE);
+	dbg_printf("[%u.%u]: input length: %u\n", dpu_id, task_id, input_length);
+//	dbg_printf("[%u:%u]: input chunk size: %u\n", dpu_id, task_id, input_chunk_size);
+	dbg_printf("[%u.%u]: pattern length: %u\n", dpu_id, task_id, pattern_length);
+	dbg_printf("[%u.%u]: pattern: %s\n", dpu_id, task_id, pattern);
 	
 	// Prepare the input and output descriptors
-	uint32_t input_start = task_id * input_chunk_size;
-	if (input_start > input_length)
-	{
+//	uint32_t input_start = task_id * input_chunk_size;
+//	if (input_start > input_length)
+//	{
 		//printf("Thread %u has no data\n", idx);
-		return 0;
-	}
+//		return 0;
+//	}
 
-	//dbg_printf("[%u:%u] starting at 0x%x chunk_size 0x%x\n", dpu_id, task_id, input_start, input_chunk_size);
+	//dbg_printf("[%u.%u] starting at 0x%x chunk_size 0x%x\n", dpu_id, task_id, input_start, input_chunk_size);
 	//strncpy(sample, input_buffer + input_start, 11);
 	//sample[10] = 0;
-	//dbg_printf("[%u:%u]: \"%s\"\n", dpu_id, task_id, sample);
+	//dbg_printf("[%u.%u]: \"%s\"\n", dpu_id, task_id, sample);
 
 	//chunk.cache = seqread_alloc();
 	//chunk.ptr = seqread_init(chunk.cache, input_buffer + input_start, &chunk.sr);
 	//chunk.curr = 0;
 	//chunk.length = MIN(input_length - input_start, input_chunk_size);
 
-	perfcounter_config(COUNT_CYCLES, true);
+//	perfcounter_config(COUNT_CYCLES, true);
 
-	line_count[task_id] = 0;
-	if (task_id == 0)
-		line_count[task_id]++;
+//	line_count[task_id] = 0;
+//	if (task_id == 0)
+//		line_count[task_id]++;
 
 	//match_count[task_id] = grep(&chunk, &line_count[task_id]);
 	//printf("[%u] completed in %ld cycles\n", task_id, perfcounter_get());

@@ -28,8 +28,7 @@ int search_dpu(struct dpu_set_t dpu, struct host_buffer_context *input, const ch
 	// Set up and run the program on the DPU
 	uint32_t input_buffer_start = MEGABYTE(1);
 	//uint32_t output_buffer_start = ALIGN(input_buffer_start + input->length, 64);
-	uint32_t pattern_length = strlen(pattern);
-	uint32_t input_length = 0x1234;//input->length;
+	uint32_t input_length = input->length;
 
 	// Must be a multiple of 8 to ensure the last write to MRAM is also a multiple of 8
 	//uint32_t output_length = ALIGN(MEGABYTE(64) - output_buffer_start, 8);
@@ -39,20 +38,15 @@ int search_dpu(struct dpu_set_t dpu, struct host_buffer_context *input, const ch
 	uint32_t chunk_size = MAX(MIN_CHUNK_SIZE, ALIGN(input->length / NR_TASKLETS, 16));
 	//dbg_printf("chunk size: 0x%x\n", chunk_size);
 
-	dbg_printf("input_length: %u\n", input_length);
 	dbg_printf("input_buffer: %u\n", input_buffer_start);
 	dbg_printf("input_chunk_size: %u\n", chunk_size);
-	dbg_printf("pattern_length: %u\n", pattern_length);
-	dbg_printf("pattern: %s @%p size=%u\n", pattern, pattern, ALIGN(pattern_length, 4));
 
-	DPU_ASSERT(dpu_copy_to(dpu, "input_length", 0, &input_length, sizeof(uint32_t)));
-//	DPU_ASSERT(dpu_copy_to(dpu, "input_buffer", 0, &input_buffer_start, sizeof(uint32_t)));
-//	DPU_ASSERT(dpu_copy_to(dpu, "input_chunk_size", 0, &chunk_size, sizeof(uint32_t)));
+	//DPU_ASSERT(dpu_copy_to(dpu, "input_buffer", 0, &input_buffer_start, sizeof(uint32_t)));
+	//DPU_ASSERT(dpu_copy_to(dpu_rank, "input_length", 0, &input_length, sizeof(uint32_t)));
+	//DPU_ASSERT(dpu_copy_to(dpu, "input_chunk_size", 0, &chunk_size, sizeof(uint32_t)));
 	//DPU_ASSERT(dpu_copy_to(dpu, "output_length", 0, &output_length, sizeof(uint32_t)));
 	//DPU_ASSERT(dpu_copy_to(dpu, "output_buffer", 0, &output_buffer_start, sizeof(uint32_t)));
 //	DPU_ASSERT(dpu_copy_to(dpu, "options", 0, opts, ALIGN(sizeof(struct grep_options), 4)));
-	DPU_ASSERT(dpu_copy_to(dpu, "pattern_length", 0, &pattern_length, sizeof(uint32_t)));
-//	DPU_ASSERT(dpu_copy_to(dpu, "pattern", 0, pattern, ALIGN(pattern_length, 8)));
 
 	// dpu_copy_to_mram allows us to pass a variable size buffer to a variable
 	// location. That means it is more flexible, and we don't have to know the
@@ -68,13 +62,22 @@ int search_dpu(struct dpu_set_t dpu, struct host_buffer_context *input, const ch
 	return GREP_OK;
 }
 
-int search_rank(struct dpu_set_t rank, uint8_t rank_id, struct host_buffer_context *input, 
+int search_rank(struct dpu_set_t dpu_rank, uint8_t rank_id, struct host_buffer_context *input, 
 	uint8_t count, const char* pattern, struct grep_options* opts)
 {
 	struct dpu_set_t dpu;
 	uint32_t dpu_id=0; // the id of the DPU inside the rank (0-63)
+	uint32_t pattern_length = strlen(pattern);
+	uint32_t input_length = 0x1234;
+	uint32_t dpu_count;
 
-	DPU_FOREACH(rank, dpu)
+	//dbg_printf("pattern_length: %u\n", pattern_length);
+	//dbg_printf("pattern: %s @%p size=%u\n", pattern, pattern, ALIGN(pattern_length, 4));
+	DPU_ASSERT(dpu_copy_to(dpu_rank, "pattern_length", 0, &pattern_length, sizeof(uint32_t)));
+	DPU_ASSERT(dpu_copy_to(dpu_rank, "pattern", 0, pattern, ALIGN(pattern_length, 4)));
+	dpu_get_nr_dpus(dpu_rank, &dpu_count);
+	dbg_printf("There are %u DPUs in this set\n", dpu_count);
+	DPU_FOREACH(dpu_rank, dpu)
 	{
 		if (dpu_id < count)
 		{
@@ -102,8 +105,8 @@ int read_results_dpu_rank(struct dpu_set_t dpu_rank, struct host_buffer_context 
 
 		// Get the results back from each individual DPU in the rank
 		//dpu_copy_from_mram(dpu.dpu, (unsigned char*)output->buffer, output_buffer_start, output->length, 0);
-		DPU_ASSERT(dpu_copy_from(dpu, "line_count", 0, line_count, sizeof(uint32_t) * NR_TASKLETS));
-		DPU_ASSERT(dpu_copy_from(dpu, "match_count", 0, match_count, sizeof(uint32_t) * NR_TASKLETS));
+		//DPU_ASSERT(dpu_copy_from(dpu, "line_count", 0, line_count, sizeof(uint32_t) * NR_TASKLETS));
+		//DPU_ASSERT(dpu_copy_from(dpu, "match_count", 0, match_count, sizeof(uint32_t) * NR_TASKLETS));
 
 		// aggregate the statistics
 		for (uint8_t i=0; i < NR_TASKLETS; i++)
@@ -277,6 +280,7 @@ int main(int argc, char **argv)
 		usage(argv[0]);
 		return -1;
 	}
+
 
 	uint8_t rank_id;
 	uint64_t rank_status=0; // bitmap indicating if the rank is busy or free
