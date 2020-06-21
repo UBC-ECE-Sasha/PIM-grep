@@ -36,22 +36,22 @@ int search_dpu(struct dpu_set_t dpu, struct host_buffer_context *input, const ch
 	//	input_buffer_start, input->length, output_buffer_start, output_length);
 
 	uint32_t chunk_size = MAX(MIN_CHUNK_SIZE, ALIGN(input->length / NR_TASKLETS, 16));
-	//dbg_printf("chunk size: 0x%x\n", chunk_size);
 
 	dbg_printf("input_buffer: %u\n", input_buffer_start);
 	dbg_printf("input_chunk_size: %u\n", chunk_size);
 
 	//DPU_ASSERT(dpu_copy_to(dpu, "input_buffer", 0, &input_buffer_start, sizeof(uint32_t)));
-	//DPU_ASSERT(dpu_copy_to(dpu_rank, "input_length", 0, &input_length, sizeof(uint32_t)));
-	//DPU_ASSERT(dpu_copy_to(dpu, "input_chunk_size", 0, &chunk_size, sizeof(uint32_t)));
+	//DPU_ASSERT(dpu_copy_to(dpu, "input_buffer", 0, &input->curr, 10));
+	DPU_ASSERT(dpu_copy_to(dpu, "input_length", 0, &input_length, sizeof(uint32_t)));
+	DPU_ASSERT(dpu_copy_to(dpu, "input_chunk_size", 0, &chunk_size, sizeof(uint32_t)));
 	//DPU_ASSERT(dpu_copy_to(dpu, "output_length", 0, &output_length, sizeof(uint32_t)));
 	//DPU_ASSERT(dpu_copy_to(dpu, "output_buffer", 0, &output_buffer_start, sizeof(uint32_t)));
-//	DPU_ASSERT(dpu_copy_to(dpu, "options", 0, opts, ALIGN(sizeof(struct grep_options), 4)));
+	DPU_ASSERT(dpu_copy_to(dpu, "options", 0, opts, ALIGN(sizeof(struct grep_options), 4)));
 
 	// dpu_copy_to_mram allows us to pass a variable size buffer to a variable
 	// location. That means it is more flexible, and we don't have to know the
 	// size of the input buffer ahead of time in the DPU program.
-	//DPU_ASSERT(dpu_copy_to_mram(dpu.dpu, input_buffer_start, input->curr, ALIGN(input->length, 8), 0));
+	DPU_ASSERT(dpu_copy_to_mram(dpu.dpu, input_buffer_start, input->curr, ALIGN(input->length, 8), 0));
 
 	if (dpu_launch(dpu, DPU_ASYNCHRONOUS) != 0)
 	{
@@ -68,7 +68,6 @@ int search_rank(struct dpu_set_t dpu_rank, uint8_t rank_id, struct host_buffer_c
 	struct dpu_set_t dpu;
 	uint32_t dpu_id=0; // the id of the DPU inside the rank (0-63)
 	uint32_t pattern_length = strlen(pattern);
-	uint32_t input_length = 0x1234;
 	uint32_t dpu_count;
 
 	//dbg_printf("pattern_length: %u\n", pattern_length);
