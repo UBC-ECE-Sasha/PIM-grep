@@ -14,13 +14,16 @@
 #define dbg_printf(...)
 #endif
 
+#define IS_OPTION_SET(_t, _o) ((_t)->flags & (1<<(_o)))
+
 typedef struct in_buffer_context
 {
 	char* ptr;
 	seqreader_buffer_t cache;
 	seqreader_t sr;
-	uint32_t curr;
+	//uint32_t curr;
 	uint32_t length;
+	uint32_t first_line;
 } in_buffer_context;
 
 typedef struct out_buffer_context

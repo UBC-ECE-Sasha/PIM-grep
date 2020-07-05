@@ -7,8 +7,6 @@
 #include <defs.h>
 #include "dpu_grep.h"
 
-#define IS_OPTION_SET(_t, _o) ((_t)->flags & (1<<(_o)))
-
 extern char pattern[64];
 extern uint32_t pattern_length;
 extern struct grep_options options;
@@ -69,7 +67,7 @@ static unsigned char READ_BYTE(struct in_buffer_context *_i)
 {
 	uint8_t ret = *_i->ptr;
 	_i->ptr = seqread_get(_i->ptr, sizeof(uint8_t), &_i->sr);
-	_i->curr++;
+	//_i->curr++;
 	return ret;
 }
 
@@ -97,7 +95,7 @@ uint32_t grep(struct in_buffer_context *buf, uint32_t *line_count)
 	uint32_t match_count = 0;
 	uint8_t task_id = me();
 
-	//dbg_printf("[%i] %u term=%s length=%u lines=%u\n", task_id, buf->length, pattern, pattern_length, *line_count);
+	dbg_printf("[%i] %u term=%s length=%u lines=%u\n", task_id, buf->length, pattern, pattern_length, *line_count);
 	for (uint32_t i=0; i < buf->length; i++)
 	{
 		char c = READ_BYTE(buf);

@@ -20,8 +20,8 @@
 #define MAX_PATTERN 63
 #define TEMP_LENGTH 256
 
-const char options[]="dt:";
-static const char dummy_buffer[MEGABYTE(1)];
+const char options[]="A:B:cdt:";
+static char dummy_buffer[MEGABYTE(1)];
 
 int search_rank(struct dpu_set_t dpu_rank, uint8_t rank_id, struct host_buffer_context input[], 
 	uint8_t count, const char* pattern, struct grep_options* opts)
@@ -29,37 +29,34 @@ int search_rank(struct dpu_set_t dpu_rank, uint8_t rank_id, struct host_buffer_c
 	struct dpu_set_t dpu;
 	uint32_t dpu_id=0; // the id of the DPU inside the rank (0-63)
 	uint32_t pattern_length = strlen(pattern);
-	char sample[11];
+	UNUSED(rank_id);
 
 	// copy the common items to all DPUs in the rank
 	DPU_ASSERT(dpu_copy_to(dpu_rank, "pattern_length", 0, &pattern_length, sizeof(uint32_t)));
 	DPU_ASSERT(dpu_copy_to(dpu_rank, "pattern", 0, pattern, ALIGN(pattern_length, 4)));
-	//DPU_ASSERT(dpu_copy_to(dpu_rank, "options", 0, opts, ALIGN(sizeof(struct grep_options), 8)));
+	DPU_ASSERT(dpu_copy_to(dpu_rank, "options", 0, opts, ALIGN(sizeof(struct grep_options), 8)));
 
 	// copy the items specific to each DPU
-	char* buffer;
+	const char* buffer;
 	DPU_FOREACH(dpu_rank, dpu, dpu_id)
 	{
 		if (dpu_id < count)
 		{
-		uint32_t input_length = input[dpu_id].length;
-		uint32_t chunk_size = MAX(MIN_CHUNK_SIZE, ALIGN(input_length / NR_TASKLETS, 16));
-		buffer = input[dpu_id].buffer;
+			uint32_t input_length = input[dpu_id].length;
+			uint32_t chunk_size = MAX(MIN_CHUNK_SIZE, ALIGN(input_length / NR_TASKLETS, 16));
+			buffer = input[dpu_id].buffer;
 
-		dbg_printf("file: %s length: %u\n", input[dpu_id].filename, input[dpu_id].length);
-		strncpy(sample, buffer, 10);
-		sample[10] = 0;
-		dbg_printf("input: %s\n", sample);
-		DPU_ASSERT(dpu_copy_to(dpu, "dpu_id", 0, &dpu_id, sizeof(uint32_t)));
-		DPU_ASSERT(dpu_copy_to(dpu, "input_chunk_size", 0, &chunk_size, sizeof(uint32_t)));
-		DPU_ASSERT(dpu_copy_to(dpu, "input_length", 0, &input_length, sizeof(uint32_t)));
-		DPU_ASSERT(dpu_prepare_xfer(dpu, buffer));
+			DPU_ASSERT(dpu_copy_to(dpu, "dpu_id", 0, &dpu_id, sizeof(uint32_t)));
+			DPU_ASSERT(dpu_copy_to(dpu, "input_chunk_size", 0, &chunk_size, sizeof(uint32_t)));
+			DPU_ASSERT(dpu_copy_to(dpu, "input_length", 0, &input_length, sizeof(uint32_t)));
+			DPU_ASSERT(dpu_copy_to(dpu, "fname_ptr", 0, &input[dpu_id].filename, sizeof(char*)));
+			printf("Saving filename in %p\n", input[dpu_id].filename);
 		}
 		else
 		{
 			buffer = dummy_buffer;
-			DPU_ASSERT(dpu_prepare_xfer(dpu, buffer));
 		}
+		DPU_ASSERT(dpu_prepare_xfer(dpu, (void*)buffer));
 	}
 
 	DPU_ASSERT(dpu_push_xfer(dpu_rank, DPU_XFER_TO_DPU, "input_buffer", 0, MEGABYTE(1), DPU_XFER_DEFAULT));
@@ -79,20 +76,25 @@ int read_results_dpu_rank(struct dpu_set_t dpu_rank, struct host_buffer_context 
 	//DPU_ASSERT(dpu_rank.kind == DPU_SET_RANKS);
 	DPU_FOREACH(dpu_rank, dpu)
 	{
-
+#ifdef DEBUG
 		DPU_ASSERT(dpu_log_read(dpu, stdout));
+#endif // DEBUG
 
+		uint64_t fname;
 
 		// Get the results back from each individual DPU in the rank
 		//dpu_copy_from_mram(dpu.dpu, (unsigned char*)output->buffer, output_buffer_start, output->length, 0);
-		//DPU_ASSERT(dpu_copy_from(dpu, "line_count", 0, line_count, sizeof(uint32_t) * NR_TASKLETS));
-		//DPU_ASSERT(dpu_copy_from(dpu, "match_count", 0, match_count, sizeof(uint32_t) * NR_TASKLETS));
+		DPU_ASSERT(dpu_copy_from(dpu, "line_count", 0, line_count, sizeof(uint32_t) * NR_TASKLETS));
+		DPU_ASSERT(dpu_copy_from(dpu, "match_count", 0, match_count, sizeof(uint32_t) * NR_TASKLETS));
+		DPU_ASSERT(dpu_copy_from(dpu, "fname_ptr", 0, &output->filename, sizeof(char*)));
+		output->filename = (void*)fname;
+		printf("Retrieving results from %s\n", output->filename);
 
 		// aggregate the statistics
 		for (uint8_t i=0; i < NR_TASKLETS; i++)
 		{
-			//output->line_count += line_count[i];
-			//output->match_count += match_count[i];
+			output->line_count += line_count[i];
+			output->match_count += match_count[i];
 		}
 	}
 
@@ -117,6 +119,7 @@ static int read_input_host(char *in_file, struct host_buffer_context *input)
 	}
 
 	input->filename = strdup(in_file);
+	printf("filename duped into %p\n", input->filename);
 	stat(in_file, &st);
 	input->length = st.st_size;
 
@@ -143,6 +146,9 @@ static void usage(const char* exe_name)
 #endif //DEBUG
 	fprintf(stderr, "Search for a regular expression, like grep\nCan use either the host CPU or UPMEM DPU\n");
 	fprintf(stderr, "usage: %s -d -t <search term> <filenames>\n", exe_name);
+	fprintf(stderr, "A: context after match\n");
+	fprintf(stderr, "B: context before match\n");
+	fprintf(stderr, "c: count all matches; suppress normal output\n");
 	fprintf(stderr, "d: use DPU\n");
 	fprintf(stderr, "t: term to search for\n");
 }
@@ -160,7 +166,7 @@ int main(int argc, char **argv)
 	char *search_term = NULL;
 	char **input_files = NULL;
 	struct host_buffer_context *input;
-	struct host_buffer_context output;
+	struct host_buffer_context *output;
 	char pattern[MAX_PATTERN + 1];
 	struct grep_options opts;
 	struct dpu_set_t dpus, dpu_rank;
@@ -211,6 +217,7 @@ int main(int argc, char **argv)
 			break;
 
 		default:
+			printf("Unrecognized option\n");
 			usage(argv[0]);
 			return -2;
 		}
@@ -258,6 +265,7 @@ int main(int argc, char **argv)
 	// if there are no input files, we have no work to do!
 	if (input_file_count == 0)
 	{
+		printf("No input files!\n");
 		usage(argv[0]);
 		return -1;
 	}
@@ -291,6 +299,9 @@ int main(int argc, char **argv)
 		if (input_file_count < dpu_count)
 			printf("Warning: fewer input files than DPUs (%u < %u)\n", input_file_count, dpu_count);
 	}
+
+	// prepare the dummy buffer
+	sprintf(dummy_buffer, "DUMMY DUMMY DUMMY");
 
 	// Read each input file into main memory
 	uint32_t file_index=0;
@@ -348,7 +359,7 @@ int main(int argc, char **argv)
 				break;
 
 			rank_id = 0;
-			dbg_printf("Checking for completed ranks starting with %u\n", rank_id);
+			//dbg_printf("Checking for completed ranks starting with %u\n", rank_id);
 			DPU_RANK_FOREACH(dpus, dpu_rank)
 			{
 				bool done, fault;
@@ -362,6 +373,9 @@ int main(int argc, char **argv)
 						rank_status &= ~((uint64_t)1<<rank_id);
 						printf("Rank %u done status=0x%lx\n", rank_id, rank_status);
 						read_results_dpu_rank(dpu_rank, &output);
+						printf("results from: %s\n", output.filename);
+						printf("Matches: %u\n", output.match_count);
+						printf("Lines: %u\n", output.line_count);
 					}
 					if (fault)
 					{
@@ -378,7 +392,7 @@ int main(int argc, char **argv)
 	dbg_printf("Waiting for all DPUs to finish\n");
 	while (rank_status)
 	{
-		dbg_printf("Checking for completed ranks status=0x%lx\n", rank_status);
+		//dbg_printf("Checking for completed ranks status=0x%lx\n", rank_status);
 		rank_id = 0;
 		DPU_RANK_FOREACH(dpus, dpu_rank)
 		{
@@ -393,6 +407,9 @@ int main(int argc, char **argv)
 					rank_status &= ~((uint64_t)1<<rank_id);
 					printf("Rank %u done status=0x%lx\n", rank_id, rank_status);
 					read_results_dpu_rank(dpu_rank, &output);
+					printf("results from: %s\n", output.filename);
+					printf("Matches: %u\n", output.match_count);
+					printf("Lines: %u\n", output.line_count);
 				}
 				if (fault)
 				{
