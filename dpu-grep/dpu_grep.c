@@ -46,8 +46,6 @@ static char *label = NULL;      /* Fake filename for stdin */
 static intmax_t outleft;	/* Maximum number of selected lines.  */
 //static intmax_t pending;	/* Pending lines of output.
 //                                   Always kept 0 if out_quiet is true.  */
-static bool done_on_match;	/* Stop scanning file on first match.  */
-static bool exit_on_match;	/* Exit on first match.  */
 //static bool dev_null_output;	/* Stdout is known to be /dev/null.  */
 //static bool binary;		/* Use binary rather than text I/O.  */
 
@@ -93,6 +91,7 @@ uint32_t grep(struct in_buffer_context *buf, uint32_t *line_count)
 {
 	uint8_t p_index = 0;
 	uint32_t match_count = 0;
+	uint32_t prev_match_line = -1;
 	uint8_t task_id = me();
 
 	dbg_printf("[%i] %u term=%s length=%u lines=%u\n", task_id, buf->length, pattern, pattern_length, *line_count);
@@ -115,11 +114,21 @@ uint32_t grep(struct in_buffer_context *buf, uint32_t *line_count)
 			{
 				dbg_printf("[%u]: found at line +%u\n", task_id, *line_count);
 				p_index = 0;
-				match_count++;
 
-				// if we only need to find the first match, we are done
-				if (!IS_OPTION_SET(&options, OPTION_FLAG_COUNT_MATCHES))
+				if (IS_OPTION_SET(&options, OPTION_FLAG_COUNT_MATCHES))
+				{
+					// only count unique lines that match
+					if (*line_count != prev_match_line)
+					{
+						match_count++;
+						prev_match_line = *line_count;
+					}
+				}
+				else
+				{
+					// if we only need to find the first match, we are done
 					goto done;
+				}
 			}
 		}
 	}
