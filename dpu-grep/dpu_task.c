@@ -14,7 +14,6 @@ __host uint32_t dpu_id;
 __host uint32_t input_length;
 __host uint32_t input_chunk_size;
 __host uint32_t pattern_length;
-__host uint64_t fname_ptr; // the address on the host of the variable containing the filename
 __host char pattern[64];
 
 
@@ -38,7 +37,6 @@ int main()
 	dbg_printf("[%u:%u]: input chunk size: %u\n", dpu_id, task_id, input_chunk_size);
 	dbg_printf("[%u.%u]: pattern length: %u\n", dpu_id, task_id, pattern_length);
 	dbg_printf("[%u.%u]: pattern: %s\n", dpu_id, task_id, pattern);
-	printf("fname_ptr: 0x%lx\n", fname_ptr);
 	}
 	
 	// Prepare the input and output descriptors

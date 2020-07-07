@@ -14,16 +14,19 @@
 #include "grep-host.h"
 
 #define DPU_PROGRAM "dpu-grep/grep.dpu"
-#define MAX_INPUT_LENGTH MEGABYTE(32)
+#define MAX_INPUT_LENGTH MEGABYTE(4)
 #define MAX_OUTPUT_LENGTH MEGABYTE(32)
 #define MIN_CHUNK_SIZE 256 // not worthwhile making another tasklet work for data less than this
 #define MAX_PATTERN 63
 #define TEMP_LENGTH 256
+#define MAX_RANKS 10
 
 const char options[]="A:B:cdt:";
 static char dummy_buffer[MEGABYTE(1)];
+static uint32_t rank_count, dpu_count;
+static uint32_t dpus_per_rank;
 
-int search_rank(struct dpu_set_t dpu_rank, uint8_t rank_id, struct host_buffer_context input[], 
+int search_rank(struct dpu_set_t dpu_rank, uint8_t rank_id, struct host_buffer_descriptor input[], 
 	uint8_t count, const char* pattern, struct grep_options* opts)
 {
 	struct dpu_set_t dpu;
@@ -49,8 +52,6 @@ int search_rank(struct dpu_set_t dpu_rank, uint8_t rank_id, struct host_buffer_c
 			DPU_ASSERT(dpu_copy_to(dpu, "dpu_id", 0, &dpu_id, sizeof(uint32_t)));
 			DPU_ASSERT(dpu_copy_to(dpu, "input_chunk_size", 0, &chunk_size, sizeof(uint32_t)));
 			DPU_ASSERT(dpu_copy_to(dpu, "input_length", 0, &input_length, sizeof(uint32_t)));
-			DPU_ASSERT(dpu_copy_to(dpu, "fname_ptr", 0, &input[dpu_id].filename, sizeof(char*)));
-			printf("Saving filename in %p\n", input[dpu_id].filename);
 		}
 		else
 		{
@@ -67,37 +68,74 @@ int search_rank(struct dpu_set_t dpu_rank, uint8_t rank_id, struct host_buffer_c
 	return 0;
 }
 
-int read_results_dpu_rank(struct dpu_set_t dpu_rank, struct host_buffer_context *output)
+int read_results_dpu_rank(struct dpu_set_t dpu_rank, struct host_context *output)
 {
 	struct dpu_set_t dpu;
 	uint32_t line_count[NR_TASKLETS];
 	uint32_t match_count[NR_TASKLETS];
 
-	//DPU_ASSERT(dpu_rank.kind == DPU_SET_RANKS);
-	DPU_FOREACH(dpu_rank, dpu)
+	uint8_t dpu_id;
+	DPU_FOREACH(dpu_rank, dpu, dpu_id)
 	{
+		if (dpu_id > output->used)
+			break;
+
 #ifdef DEBUG
 		DPU_ASSERT(dpu_log_read(dpu, stdout));
 #endif // DEBUG
 
-		uint64_t fname;
-
 		// Get the results back from each individual DPU in the rank
-		//dpu_copy_from_mram(dpu.dpu, (unsigned char*)output->buffer, output_buffer_start, output->length, 0);
 		DPU_ASSERT(dpu_copy_from(dpu, "line_count", 0, line_count, sizeof(uint32_t) * NR_TASKLETS));
 		DPU_ASSERT(dpu_copy_from(dpu, "match_count", 0, match_count, sizeof(uint32_t) * NR_TASKLETS));
-		DPU_ASSERT(dpu_copy_from(dpu, "fname_ptr", 0, &output->filename, sizeof(char*)));
-		output->filename = (void*)fname;
-		printf("Retrieving results from %s\n", output->filename);
+		//DPU_ASSERT(dpu_copy_from(dpu, "matches", 0, matches, sizeof(uint32_t) * match_count);
+		//printf("Retrieving results from %s\n", output->filename);
 
 		// aggregate the statistics
 		for (uint8_t i=0; i < NR_TASKLETS; i++)
 		{
-			output->line_count += line_count[i];
-			output->match_count += match_count[i];
+			output->desc[dpu_id].line_count += line_count[i];
+			output->desc[dpu_id].match_count += match_count[i];
 		}
 	}
 
+	return 0;
+}
+
+int check_for_completed_rank(struct dpu_set_t dpus, uint64_t* rank_status, struct host_context ctx[], host_results *results)
+{
+	struct dpu_set_t dpu_rank;
+	uint8_t rank_id=0;
+
+//	printf("%s\n", __func__);
+	DPU_RANK_FOREACH(dpus, dpu_rank)
+	{
+		bool done, fault;
+
+		if (*rank_status & ((uint64_t)1<<rank_id))
+		{
+			// check to see if anything has completed
+			dpu_status(dpu_rank, &done, &fault);
+			if (done)
+			{
+				uint32_t dpu_id;
+				struct host_context* rank_ctx = &ctx[rank_id];
+				*rank_status &= ~((uint64_t)1<<rank_id);
+				read_results_dpu_rank(dpu_rank, rank_ctx);
+				for (dpu_id=0; dpu_id < rank_ctx->used; dpu_id++)
+				{
+					printf("%s:%u\n", rank_ctx->desc[dpu_id].filename, rank_ctx->desc[dpu_id].match_count);
+					results->total_line_count += rank_ctx->desc[dpu_id].line_count;
+					results->total_match_count += rank_ctx->desc[dpu_id].match_count;
+				}
+			}
+			if (fault)
+			{
+				printf("rank %u fault - abort!\n", rank_id);
+				return -2;
+			}
+		}
+		rank_id++;
+	}
 	return 0;
 }
 
@@ -108,7 +146,7 @@ int read_results_dpu_rank(struct dpu_set_t dpu_rank, struct host_buffer_context 
  * @param in_file The input filename.
  * @param input The struct to which contents of file are written to.
  */
-static int read_input_host(char *in_file, struct host_buffer_context *input)
+static int read_input_host(char *in_file, struct host_buffer_descriptor *input)
 {
 	struct stat st;
 
@@ -119,7 +157,6 @@ static int read_input_host(char *in_file, struct host_buffer_context *input)
 	}
 
 	input->filename = strdup(in_file);
-	printf("filename duped into %p\n", input->filename);
 	stat(in_file, &st);
 	input->length = st.st_size;
 
@@ -131,7 +168,7 @@ static int read_input_host(char *in_file, struct host_buffer_context *input)
 	}
 
 	//input->buffer = malloc(input->length * sizeof(*(input->buffer)));
-	input->buffer = malloc(MEGABYTE(2));
+	input->buffer = malloc(MAX_INPUT_LENGTH);
 	input->curr = input->buffer;
 	size_t n = fread(input->buffer, sizeof(*(input->buffer)), input->length, fin);
 	fclose(fin);
@@ -165,17 +202,14 @@ int main(int argc, char **argv)
 	uint32_t allocated_count = 0;
 	char *search_term = NULL;
 	char **input_files = NULL;
-	struct host_buffer_context *input;
-	struct host_buffer_context *output;
+	struct host_context *ctx;
 	char pattern[MAX_PATTERN + 1];
 	struct grep_options opts;
 	struct dpu_set_t dpus, dpu_rank;
+	host_results results;
 
+	memset(&results, 0, sizeof(host_results));
 	memset(&opts, 0, sizeof(struct grep_options));
-
-	output.buffer = NULL;
-	output.length = 0;
-	output.max = MAX_OUTPUT_LENGTH;
 
 	while ((opt = getopt(argc, argv, options)) != -1)
 	{
@@ -225,7 +259,6 @@ int main(int argc, char **argv)
 
 	// at this point, all the rest of the arguments are files to search through
 	int remain_arg_count = argc - optind;
-
 	if (remain_arg_count && strcmp(argv[optind], "-") == 0)
 	{
 		int consumed = TEMP_LENGTH;
@@ -243,7 +276,6 @@ int main(int argc, char **argv)
 			}
 			strtok(buff, "\r\n\t");
 			consumed = strlen(buff) + 1;
-			//dbg_printf("filename: %s (%u)\n", buff, consumed);
 			if (stat(buff, &st) == 0 && S_ISREG(st.st_mode))
 				input_files[input_file_count++] = strdup(buff);
 			// scootch the remaining bytes forward in tmp
@@ -273,7 +305,6 @@ int main(int argc, char **argv)
 	uint8_t rank_id;
 	uint64_t rank_status=0; // bitmap indicating if the rank is busy or free
 	uint32_t submitted;
-	uint32_t rank_count, dpu_count, dpus_per_rank;
 	if (use_dpu)
 	{
 		// allocate all of the DPUS up-front, then check to see how many we got
@@ -298,6 +329,9 @@ int main(int argc, char **argv)
 		}
 		if (input_file_count < dpu_count)
 			printf("Warning: fewer input files than DPUs (%u < %u)\n", input_file_count, dpu_count);
+
+		// allocate space for file descriptors
+		ctx = calloc(rank_count, sizeof(host_context));
 	}
 
 	// prepare the dummy buffer
@@ -307,7 +341,7 @@ int main(int argc, char **argv)
 	uint32_t file_index=0;
 	uint32_t remaining_file_count = input_file_count;
 	dbg_printf("Input file count=%u\n", input_file_count);
-	input = malloc(sizeof(struct host_buffer_context) * dpus_per_rank);
+	struct host_buffer_descriptor *input = calloc(dpus_per_rank, sizeof(struct host_buffer_descriptor));
 
 	// as long as there are still files to process
 	while (remaining_file_count)
@@ -338,15 +372,16 @@ int main(int argc, char **argv)
 		while (!submitted)
 		{
 			// submit those files to a free rank
-			struct host_buffer_context output;
 			rank_id = 0;
 			DPU_RANK_FOREACH(dpus, dpu_rank)
 			{
 				if (!(rank_status & ((uint64_t)1<<rank_id)))
 				{
 					rank_status |= ((uint64_t)1<<rank_id);
-					printf("Submitted to rank %u status=0x%lx\n", rank_id, rank_status);
+					dbg_printf("Submitted to rank %u status=0x%lx\n", rank_id, rank_status);
 					status = search_rank(dpu_rank, rank_id, input, prepared_file_count, pattern, &opts);
+					ctx[rank_id].desc = input;
+					ctx[rank_id].used = prepared_file_count;
 					submitted = 1;
 					break;
 				}
@@ -358,33 +393,7 @@ int main(int argc, char **argv)
 			if (submitted)
 				break;
 
-			rank_id = 0;
-			//dbg_printf("Checking for completed ranks starting with %u\n", rank_id);
-			DPU_RANK_FOREACH(dpus, dpu_rank)
-			{
-				bool done, fault;
-
-				if (rank_status & ((uint64_t)1<<rank_id))
-				{
-					// check to see if anything has completed
-					dpu_status(dpu_rank, &done, &fault);
-					if (done)
-					{
-						rank_status &= ~((uint64_t)1<<rank_id);
-						printf("Rank %u done status=0x%lx\n", rank_id, rank_status);
-						read_results_dpu_rank(dpu_rank, &output);
-						printf("results from: %s\n", output.filename);
-						printf("Matches: %u\n", output.match_count);
-						printf("Lines: %u\n", output.line_count);
-					}
-					if (fault)
-					{
-						printf("rank %u fault - abort!\n", rank_id);
-						goto done;
-					}
-				}
-				rank_id++;
-			}
+			int ret = check_for_completed_rank(dpus, &rank_status, ctx, &results);
 		}
 	}
 
@@ -392,33 +401,9 @@ int main(int argc, char **argv)
 	dbg_printf("Waiting for all DPUs to finish\n");
 	while (rank_status)
 	{
-		//dbg_printf("Checking for completed ranks status=0x%lx\n", rank_status);
-		rank_id = 0;
-		DPU_RANK_FOREACH(dpus, dpu_rank)
-		{
-			bool done, fault;
-
-			if (rank_status & ((uint64_t)1<<rank_id))
-			{
-				// check to see if anything has completed
-				dpu_status(dpu_rank, &done, &fault);
-				if (done)
-				{
-					rank_status &= ~((uint64_t)1<<rank_id);
-					printf("Rank %u done status=0x%lx\n", rank_id, rank_status);
-					read_results_dpu_rank(dpu_rank, &output);
-					printf("results from: %s\n", output.filename);
-					printf("Matches: %u\n", output.match_count);
-					printf("Lines: %u\n", output.line_count);
-				}
-				if (fault)
-				{
-					printf("rank %u fault - aborting\n", rank_id);
-					goto done;
-				}
-			}
-			rank_id++;
-		}
+		int ret = check_for_completed_rank(dpus, &rank_status, ctx, &results);
+		if (ret == -2)
+			goto done;
 		usleep(1);
 	}
 
@@ -431,8 +416,8 @@ done:
 		exit(EXIT_FAILURE);
 	}
 
-	printf("Total line count: %u\n", output.line_count);
-	printf("Total matches: %u\n", output.match_count);
+	printf("Total line count: %u\n", results.total_line_count);
+	printf("Total matches: %u\n", results.total_match_count);
 
 	return 0;
 }
