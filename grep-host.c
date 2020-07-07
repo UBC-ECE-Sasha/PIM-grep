@@ -80,15 +80,15 @@ int read_results_dpu_rank(struct dpu_set_t dpu_rank, struct host_context *output
 		if (dpu_id > output->used)
 			break;
 
-#ifdef DEBUG
+#ifdef DEBUG_DPU
+		printf("Retrieving results from %s\n", output->filename);
 		DPU_ASSERT(dpu_log_read(dpu, stdout));
-#endif // DEBUG
+#endif // DEBUG_DPU
 
 		// Get the results back from each individual DPU in the rank
 		DPU_ASSERT(dpu_copy_from(dpu, "line_count", 0, line_count, sizeof(uint32_t) * NR_TASKLETS));
 		DPU_ASSERT(dpu_copy_from(dpu, "match_count", 0, match_count, sizeof(uint32_t) * NR_TASKLETS));
 		//DPU_ASSERT(dpu_copy_from(dpu, "matches", 0, matches, sizeof(uint32_t) * match_count);
-		//printf("Retrieving results from %s\n", output->filename);
 
 		// aggregate the statistics
 		for (uint8_t i=0; i < NR_TASKLETS; i++)
