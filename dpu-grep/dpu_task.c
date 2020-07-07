@@ -18,8 +18,8 @@ __host char pattern[64];
 
 
 // MRAM variables
-//char __mram_noinit input_buffer[MEGABYTE(4)] __attribute__ ((aligned (4)));
-char __mram input_buffer[1048576];
+char __mram_noinit input_buffer[MEGABYTE(4)];
+//char __mram input_buffer[1048576];
 
 int main()
 {
@@ -32,11 +32,11 @@ int main()
 		if (IS_OPTION_SET(&options, OPTION_FLAG_COUNT_MATCHES))
 			dbg_printf("   count matches\n");
 
-	//dbg_printf("Sequential reader buffer size: %u\n", SEQREAD_CACHE_SIZE);
-	dbg_printf("[%u.%u]: input length: %u\n", dpu_id, task_id, input_length);
-	dbg_printf("[%u:%u]: input chunk size: %u\n", dpu_id, task_id, input_chunk_size);
-	dbg_printf("[%u.%u]: pattern length: %u\n", dpu_id, task_id, pattern_length);
-	dbg_printf("[%u.%u]: pattern: %s\n", dpu_id, task_id, pattern);
+		//dbg_printf("Sequential reader buffer size: %u\n", SEQREAD_CACHE_SIZE);
+		dbg_printf("[%u.%u]: input length: %u\n", dpu_id, task_id, input_length);
+		dbg_printf("[%u:%u]: input chunk size: %u\n", dpu_id, task_id, input_chunk_size);
+		//dbg_printf("[%u.%u]: pattern length: %u\n", dpu_id, task_id, pattern_length);
+		dbg_printf("[%u.%u]: pattern: %s\n", dpu_id, task_id, pattern);
 	}
 	
 	// Prepare the input and output descriptors
@@ -49,7 +49,6 @@ int main()
 
 	chunk.cache = seqread_alloc();
 	chunk.ptr = seqread_init(chunk.cache, input_buffer + input_start, &chunk.sr);
-	//chunk.curr = 0;
 	chunk.length = MIN(input_length - input_start, input_chunk_size);
 
 //	perfcounter_config(COUNT_CYCLES, true);
