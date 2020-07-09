@@ -43,24 +43,37 @@ int search_rank(struct dpu_set_t dpu_rank, uint8_t rank_id, struct host_buffer_d
 	const char* buffer;
 	DPU_FOREACH(dpu_rank, dpu, dpu_id)
 	{
+		uint32_t input_length;
+		uint32_t chunk_size;
+
 		if (dpu_id < count)
 		{
-			uint32_t input_length = input[dpu_id].length;
-			uint32_t chunk_size = MAX(MIN_CHUNK_SIZE, ALIGN(input_length / NR_TASKLETS, 16));
+			input_length = input[dpu_id].length;
+			chunk_size = MAX(MIN_CHUNK_SIZE, ALIGN(input_length / NR_TASKLETS, 16));
 			buffer = input[dpu_id].buffer;
-
-			DPU_ASSERT(dpu_copy_to(dpu, "dpu_id", 0, &dpu_id, sizeof(uint32_t)));
-			DPU_ASSERT(dpu_copy_to(dpu, "input_chunk_size", 0, &chunk_size, sizeof(uint32_t)));
-			DPU_ASSERT(dpu_copy_to(dpu, "input_length", 0, &input_length, sizeof(uint32_t)));
+			dbg_printf("%s (%u) to dpu %u\n", input[dpu_id].filename, input_length, dpu_id);
 		}
 		else
 		{
+			input_length = 0;
+			chunk_size = 0;
 			buffer = dummy_buffer;
 		}
+
+		// copy the data to the DPU
+		DPU_ASSERT(dpu_copy_to(dpu, "dpu_id", 0, &dpu_id, sizeof(uint32_t)));
+		DPU_ASSERT(dpu_copy_to(dpu, "input_chunk_size", 0, &chunk_size, sizeof(uint32_t)));
+		DPU_ASSERT(dpu_copy_to(dpu, "input_length", 0, &input_length, sizeof(uint32_t)));
+#ifdef BULK_TRANSFER
 		DPU_ASSERT(dpu_prepare_xfer(dpu, (void*)buffer));
+#else
+		DPU_ASSERT(dpu_copy_to(dpu, "input_buffer", 0, buffer, MEGABYTE(1)));
+#endif //BULK_TRANSFER
 	}
 
+#ifdef BULK_TRANSFER
 	DPU_ASSERT(dpu_push_xfer(dpu_rank, DPU_XFER_TO_DPU, "input_buffer", 0, MEGABYTE(1), DPU_XFER_DEFAULT));
+#endif //BULK_TRANSFER
 
 	// launch all of the DPUs after they have been loaded
 	DPU_ASSERT(dpu_launch(dpu_rank, DPU_ASYNCHRONOUS));
@@ -73,15 +86,15 @@ int read_results_dpu_rank(struct dpu_set_t dpu_rank, struct host_context *output
 	struct dpu_set_t dpu;
 	uint32_t line_count[NR_TASKLETS];
 	uint32_t match_count[NR_TASKLETS];
-
 	uint8_t dpu_id;
+
 	DPU_FOREACH(dpu_rank, dpu, dpu_id)
 	{
 		if (dpu_id > output->used)
 			break;
 
 #ifdef DEBUG_DPU
-		printf("Retrieving results from %s\n", output->filename);
+		printf("Retrieving results from %s\n", output->desc[dpu_id].filename);
 		DPU_ASSERT(dpu_log_read(dpu, stdout));
 #endif // DEBUG_DPU
 
@@ -106,7 +119,6 @@ int check_for_completed_rank(struct dpu_set_t dpus, uint64_t* rank_status, struc
 	struct dpu_set_t dpu_rank;
 	uint8_t rank_id=0;
 
-//	printf("%s\n", __func__);
 	DPU_RANK_FOREACH(dpus, dpu_rank)
 	{
 		bool done, fault;
@@ -120,6 +132,7 @@ int check_for_completed_rank(struct dpu_set_t dpus, uint64_t* rank_status, struc
 				uint32_t dpu_id;
 				struct host_context* rank_ctx = &ctx[rank_id];
 				*rank_status &= ~((uint64_t)1<<rank_id);
+				dbg_printf("Reading results from rank %u descriptor %p\n", rank_id, rank_ctx->desc);
 				read_results_dpu_rank(dpu_rank, rank_ctx);
 				for (dpu_id=0; dpu_id < rank_ctx->used; dpu_id++)
 				{
@@ -170,7 +183,7 @@ static int read_input_host(char *in_file, struct host_buffer_descriptor *input)
 	//input->buffer = malloc(input->length * sizeof(*(input->buffer)));
 	input->buffer = malloc(MAX_INPUT_LENGTH);
 	input->curr = input->buffer;
-	size_t n = fread(input->buffer, sizeof(*(input->buffer)), input->length, fin);
+	size_t n = fread(input->buffer, 1, input->length, fin);
 	fclose(fin);
 
 	return (n != input->length);
@@ -302,6 +315,10 @@ int main(int argc, char **argv)
 		return -1;
 	}
 
+#ifdef BULK_TRANSFER
+	printf("Using bulk transfer\n");
+#endif // BULK_TRANSFER
+
 	uint8_t rank_id;
 	uint64_t rank_status=0; // bitmap indicating if the rank is busy or free
 	uint32_t submitted;
@@ -341,19 +358,19 @@ int main(int argc, char **argv)
 	uint32_t file_index=0;
 	uint32_t remaining_file_count = input_file_count;
 	dbg_printf("Input file count=%u\n", input_file_count);
-	struct host_buffer_descriptor *input = calloc(dpus_per_rank, sizeof(struct host_buffer_descriptor));
+	struct host_buffer_descriptor *input;
 
 	// as long as there are still files to process
 	while (remaining_file_count)
 	{
 		uint8_t prepared_file_count;
 		uint8_t files_to_prepare = MIN(dpus_per_rank, remaining_file_count);
-		dbg_printf("remaining file_count: %u\n", remaining_file_count);
+		input = calloc(dpus_per_rank, sizeof(struct host_buffer_descriptor));
 
 		// prepare enough files to fill the rank
 		for (prepared_file_count = 0;
 			prepared_file_count < files_to_prepare;
-			prepared_file_count++)
+			prepared_file_count++, file_index++)
 		{
 			// prepare an input buffer descriptor
 			input[prepared_file_count].buffer = NULL;
@@ -362,12 +379,16 @@ int main(int argc, char **argv)
 			input[prepared_file_count].max = MAX_INPUT_LENGTH;
 
 			// read the file into the descriptor
-			if (read_input_host(input_files[file_index++], &input[prepared_file_count]))
+			if (read_input_host(input_files[file_index], &input[prepared_file_count]))
+			{
+				dbg_printf("Error reading file %s\n", input_files[file_index]);
 				return 1;
+			}
 
 			remaining_file_count--;
 		}
-		dbg_printf("Prepared %u input descriptors\n", prepared_file_count);
+
+		dbg_printf("Prepared %u input descriptors in %p\n", prepared_file_count, input);
 		submitted = 0;
 		while (!submitted)
 		{
@@ -378,7 +399,7 @@ int main(int argc, char **argv)
 				if (!(rank_status & ((uint64_t)1<<rank_id)))
 				{
 					rank_status |= ((uint64_t)1<<rank_id);
-					dbg_printf("Submitted to rank %u status=0x%lx\n", rank_id, rank_status);
+					dbg_printf("Submitted to rank %u status=0x%lx descriptors %p\n", rank_id, rank_status, input);
 					status = search_rank(dpu_rank, rank_id, input, prepared_file_count, pattern, &opts);
 					ctx[rank_id].desc = input;
 					ctx[rank_id].used = prepared_file_count;
@@ -387,7 +408,6 @@ int main(int argc, char **argv)
 				}
 				rank_id++;
 			}
-			fflush(stdout);
 
 			// as long as we have submitted some files, don't look for finished DPUs
 			if (submitted)
