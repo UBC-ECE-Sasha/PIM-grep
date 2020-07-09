@@ -22,7 +22,7 @@
 #define MAX_RANKS 10
 
 const char options[]="A:B:cdt:";
-static char dummy_buffer[MEGABYTE(1)];
+static char dummy_buffer[MAX_INPUT_LENGTH];
 static uint32_t rank_count, dpu_count;
 static uint32_t dpus_per_rank;
 
@@ -274,12 +274,14 @@ int main(int argc, char **argv)
 	int remain_arg_count = argc - optind;
 	if (remain_arg_count && strcmp(argv[optind], "-") == 0)
 	{
-		int consumed = TEMP_LENGTH;
 		char buff[TEMP_LENGTH];
+		int bytes_remaining;
 		allocated_count = 1;
 		input_files = malloc(sizeof(char*) * allocated_count);
-		while(fread(buff + TEMP_LENGTH - consumed, consumed, 1, stdin) > 0)
+		bytes_remaining = fread(buff, 1, TEMP_LENGTH, stdin);
+		while(bytes_remaining > 0)
 		{
+			int consumed;
 			struct stat st;
 			// see if we need more space for file names
 			if (input_file_count == allocated_count)
@@ -288,11 +290,19 @@ int main(int argc, char **argv)
 				input_files = realloc(input_files, sizeof(char*) * allocated_count);
 			}
 			strtok(buff, "\r\n\t");
-			consumed = strlen(buff) + 1;
 			if (stat(buff, &st) == 0 && S_ISREG(st.st_mode))
 				input_files[input_file_count++] = strdup(buff);
-			// scootch the remaining bytes forward in tmp
+
+			consumed = strlen(buff) + 1;
+			bytes_remaining -= consumed;
+			if (consumed == 1)
+				break;
+
+			// scootch the remaining bytes forward and read some more
 			memmove(buff, buff + consumed, TEMP_LENGTH - consumed);
+			int bytes_read = fread(buff + TEMP_LENGTH - consumed, 1, consumed, stdin);
+			if (bytes_read > 0)
+				bytes_remaining += bytes_read;
 		}
 	}
 	else
