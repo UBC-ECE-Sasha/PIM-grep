@@ -16,10 +16,8 @@ __host uint32_t input_chunk_size;
 __host uint32_t pattern_length;
 __host char pattern[64];
 
-
 // MRAM variables
 char __mram_noinit input_buffer[MEGABYTE(4)];
-//char __mram input_buffer[1048576];
 
 int main()
 {
@@ -28,18 +26,20 @@ int main()
 
 	if (task_id == 0)
 	{
-		dbg_printf("options:\n");
-		if (IS_OPTION_SET(&options, OPTION_FLAG_COUNT_MATCHES))
-			dbg_printf("   count matches\n");
+		dbg_printf("options: [%c]\n",
+			(IS_OPTION_SET(&options, OPTION_FLAG_COUNT_MATCHES)) ? 'C' : ' '
+		);
 
 		//dbg_printf("Sequential reader buffer size: %u\n", SEQREAD_CACHE_SIZE);
-		dbg_printf("[%u.%u]: input length: %u\n", dpu_id, task_id, input_length);
-		dbg_printf("[%u:%u]: input chunk size: %u\n", dpu_id, task_id, input_chunk_size);
+		//dbg_printf("[%u.%u]: input length: %u\n", dpu_id, task_id, input_length);
+		//dbg_printf("[%u:%u]: input chunk size: %u\n", dpu_id, task_id, input_chunk_size);
 		//dbg_printf("[%u.%u]: pattern length: %u\n", dpu_id, task_id, pattern_length);
-		dbg_printf("[%u.%u]: pattern: %s\n", dpu_id, task_id, pattern);
+		//dbg_printf("[%u.%u]: pattern: %s\n", dpu_id, task_id, pattern);
 	}
 	
 	// Prepare the input and output descriptors
+	line_count[task_id] = 0;
+	match_count[task_id] = 0;
 	uint32_t input_start = task_id * input_chunk_size;
 	if (input_start > input_length)
 	{
@@ -53,13 +53,14 @@ int main()
 
 //	perfcounter_config(COUNT_CYCLES, true);
 
-	line_count[task_id] = 0;
 	if (task_id == 0)
 		line_count[task_id]++;
 
 	match_count[task_id] = grep(&chunk, &line_count[task_id]);
+
+	// wait for all tasks to finish
 	//printf("[%u] completed in %ld cycles\n", task_id, perfcounter_get());
-	printf("%u matches in %u lines\n", match_count[task_id], line_count[task_id]);
+	dbg_printf("%u matches in %u lines\n", match_count[task_id], line_count[task_id]);
 	return 0;
 }
 
