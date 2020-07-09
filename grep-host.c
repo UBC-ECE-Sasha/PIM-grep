@@ -40,6 +40,9 @@ int search_rank(struct dpu_set_t dpu_rank, uint8_t rank_id, struct host_buffer_d
 	DPU_ASSERT(dpu_copy_to(dpu_rank, "options", 0, opts, ALIGN(sizeof(struct grep_options), 8)));
 
 	// copy the items specific to each DPU
+#ifdef BULK_TRANSFER
+	uint32_t largest_length=0; // largest file size we have to transfer
+#endif // BULK_TRANSFER
 	const char* buffer;
 	DPU_FOREACH(dpu_rank, dpu, dpu_id)
 	{
@@ -66,13 +69,15 @@ int search_rank(struct dpu_set_t dpu_rank, uint8_t rank_id, struct host_buffer_d
 		DPU_ASSERT(dpu_copy_to(dpu, "input_length", 0, &input_length, sizeof(uint32_t)));
 #ifdef BULK_TRANSFER
 		DPU_ASSERT(dpu_prepare_xfer(dpu, (void*)buffer));
+		if (input_length > largest_length)
+			largest_length = input_length;
 #else
-		DPU_ASSERT(dpu_copy_to(dpu, "input_buffer", 0, buffer, MEGABYTE(1)));
+		DPU_ASSERT(dpu_copy_to(dpu, "input_buffer", 0, buffer, ALIGN(input_length, 8)));
 #endif //BULK_TRANSFER
 	}
 
 #ifdef BULK_TRANSFER
-	DPU_ASSERT(dpu_push_xfer(dpu_rank, DPU_XFER_TO_DPU, "input_buffer", 0, MEGABYTE(1), DPU_XFER_DEFAULT));
+	DPU_ASSERT(dpu_push_xfer(dpu_rank, DPU_XFER_TO_DPU, "input_buffer", 0, ALIGN(largest_length, 8), DPU_XFER_DEFAULT));
 #endif //BULK_TRANSFER
 
 	// launch all of the DPUs after they have been loaded
@@ -175,8 +180,8 @@ static int read_input_host(char *in_file, struct host_buffer_descriptor *input)
 
 	if (input->length > input->max)
 	{
-		fprintf(stderr, "input_size is too big (%d > %d)\n",
-				input->length, input->max);
+		fprintf(stderr, "Skipping %s: size is too big (%d > %d)\n",
+				in_file, input->length, input->max);
 		return 1;
 	}
 
