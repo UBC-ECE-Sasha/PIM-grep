@@ -17,6 +17,10 @@ NR_TASKLETS = 16
 # Default number of DPUs
 NR_DPUS = 1
 
+ifeq ($(BULK), 1)
+	CFLAGS+=-DBULK_TRANSFER
+endif
+
 SOURCE = grep-host.c
 
 .PHONY: default all dpu host clean tags
