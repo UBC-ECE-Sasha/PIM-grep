@@ -145,7 +145,13 @@ int check_for_completed_rank(struct dpu_set_t dpus, uint64_t* rank_status, struc
 					printf("%s:%u\n", rank_ctx->desc[dpu_id].filename, rank_ctx->desc[dpu_id].match_count);
 					results->total_line_count += rank_ctx->desc[dpu_id].line_count;
 					results->total_match_count += rank_ctx->desc[dpu_id].match_count;
+
+					// free the memory of the descriptor
+					free(rank_ctx->desc[dpu_id].filename);
+					free(rank_ctx->desc[dpu_id].buffer);
 				}
+				free(rank_ctx->desc);
+
 			}
 			if (fault)
 			{
