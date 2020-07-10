@@ -96,7 +96,7 @@ int read_results_dpu_rank(struct dpu_set_t dpu_rank, struct host_context *output
 
 	DPU_FOREACH(dpu_rank, dpu, dpu_id)
 	{
-		if (dpu_id > output->used)
+		if (dpu_id >= output->used)
 			break;
 
 #ifdef DEBUG_DPU
