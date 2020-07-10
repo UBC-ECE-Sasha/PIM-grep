@@ -171,7 +171,7 @@ static int read_input_host(char *in_file, struct host_buffer_descriptor *input)
 	FILE *fin = fopen(in_file, "r");
 	if (fin == NULL) {
 		fprintf(stderr, "Invalid input file: %s\n", in_file);
-		return 1;
+		return 2;
 	}
 
 	input->filename = strdup(in_file);
@@ -182,7 +182,7 @@ static int read_input_host(char *in_file, struct host_buffer_descriptor *input)
 	{
 		fprintf(stderr, "Skipping %s: size is too big (%d > %d)\n",
 				in_file, input->length, input->max);
-		return 1;
+		return 2;
 	}
 
 	//input->buffer = malloc(input->length * sizeof(*(input->buffer)));
@@ -394,10 +394,14 @@ int main(int argc, char **argv)
 			input[prepared_file_count].max = MAX_INPUT_LENGTH;
 
 			// read the file into the descriptor
-			if (read_input_host(input_files[file_index], &input[prepared_file_count]))
+			switch (read_input_host(input_files[file_index], &input[prepared_file_count]))
 			{
+			case 1:
 				dbg_printf("Error reading file %s\n", input_files[file_index]);
 				return 1;
+			case 2:
+				dbg_printf("Skipping invalid file %s\n", input_files[file_index]);
+				continue;
 			}
 
 			remaining_file_count--;
@@ -429,6 +433,12 @@ int main(int argc, char **argv)
 				break;
 
 			int ret = check_for_completed_rank(dpus, &rank_status, ctx, &results);
+			if (ret == -2)
+			{
+				printf("A rank has faulted\n");
+				status = GREP_FAULT;
+				goto done;
+			}
 		}
 	}
 
