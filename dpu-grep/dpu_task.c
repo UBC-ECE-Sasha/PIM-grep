@@ -17,7 +17,7 @@ __host uint32_t pattern_length;
 __host char pattern[64];
 
 // MRAM variables
-char __mram_noinit input_buffer[MEGABYTE(4)];
+char __mram_noinit input_buffer[MEGABYTE(16)];
 
 int main()
 {
