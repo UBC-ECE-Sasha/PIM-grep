@@ -391,8 +391,8 @@ int main(int argc, char **argv)
 
 		// prepare enough files to fill the rank
 		for (prepared_file_count = 0;
-			prepared_file_count < files_to_prepare;
-			prepared_file_count++, file_index++)
+			prepared_file_count < files_to_prepare && remaining_file_count;
+			remaining_file_count--, file_index++)
 		{
 			// prepare an input buffer descriptor
 			input[prepared_file_count].buffer = NULL;
@@ -410,8 +410,7 @@ int main(int argc, char **argv)
 				dbg_printf("Skipping invalid file %s\n", input_files[file_index]);
 				continue;
 			}
-
-			remaining_file_count--;
+			prepared_file_count++;
 		}
 
 		dbg_printf("Prepared %u input descriptors in %p\n", prepared_file_count, input);
