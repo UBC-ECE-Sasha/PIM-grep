@@ -14,7 +14,7 @@
 #include "grep-host.h"
 
 #define DPU_PROGRAM "dpu-grep/grep.dpu"
-#define MAX_INPUT_LENGTH MEGABYTE(12)
+#define MAX_INPUT_LENGTH MEGABYTE(15)
 #define MAX_OUTPUT_LENGTH MEGABYTE(2)
 #define MIN_CHUNK_SIZE 256 // not worthwhile making another tasklet work for data less than this
 #define MAX_PATTERN 63
@@ -51,10 +51,10 @@ int search_rank(struct dpu_set_t dpu_rank, uint8_t rank_id, struct host_buffer_d
 
 		if (dpu_id < count)
 		{
-			input_length = MAX(MAX_INPUT_LENGTH, input[dpu_id].length);
+			input_length = MIN(MAX_INPUT_LENGTH, input[dpu_id].length);
 			chunk_size = MAX(MIN_CHUNK_SIZE, ALIGN(input_length / NR_TASKLETS, 16));
 			buffer = input[dpu_id].buffer;
-			dbg_printf("%s (%u) to dpu %u\n", input[dpu_id].filename, input_length, dpu_id);
+			dbg_printf("%s (%u) (%u) to dpu %u\n", input[dpu_id].filename, input_length, input[dpu_id].length, dpu_id);
 		}
 		else
 		{
