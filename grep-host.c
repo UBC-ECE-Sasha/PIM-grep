@@ -19,25 +19,53 @@
 #define MIN_CHUNK_SIZE 256 // not worthwhile making another tasklet work for data less than this
 #define MAX_PATTERN 63
 #define TEMP_LENGTH 256
-#define MAX_RANKS 10
 
 const char options[]="A:B:cdt:";
 static char dummy_buffer[MAX_INPUT_LENGTH];
 static uint32_t rank_count, dpu_count;
 static uint32_t dpus_per_rank;
 
+static char* to_bin(uint64_t i, uint8_t length)
+{
+	uint8_t outchar;
+	static char outstr[65];
+
+	for (outchar=0; outchar < length; outchar++)
+	{
+		outstr[outchar] = (i & (1<<outchar)) ? 'X':'-';
+	}
+	outstr[outchar] = 0;
+	return outstr;
+}
+
 int search_rank(struct dpu_set_t dpu_rank, uint8_t rank_id, struct host_buffer_descriptor input[], 
 	uint8_t count, const char* pattern, struct grep_options* opts)
 {
 	struct dpu_set_t dpu;
+	dpu_error_t err;
 	uint32_t dpu_id=0; // the id of the DPU inside the rank (0-63)
 	uint32_t pattern_length = strlen(pattern);
 	UNUSED(rank_id);
 
 	// copy the common items to all DPUs in the rank
-	DPU_ASSERT(dpu_copy_to(dpu_rank, "pattern_length", 0, &pattern_length, sizeof(uint32_t)));
-	DPU_ASSERT(dpu_copy_to(dpu_rank, "pattern", 0, pattern, ALIGN(pattern_length, 4)));
-	DPU_ASSERT(dpu_copy_to(dpu_rank, "options", 0, opts, ALIGN(sizeof(struct grep_options), 8)));
+	err = dpu_copy_to(dpu_rank, "pattern_length", 0, &pattern_length, sizeof(uint32_t));
+	if (err != DPU_OK)
+	{
+		dbg_printf("Error %u copying pattern_length\n", err);
+		return -1;
+	}
+	err = dpu_copy_to(dpu_rank, "pattern", 0, pattern, ALIGN(pattern_length, 4));
+	if (err != DPU_OK)
+	{
+		dbg_printf("Error %u copying pattern\n", err);
+		return -1;
+	}
+	err = dpu_copy_to(dpu_rank, "options", 0, opts, ALIGN(sizeof(struct grep_options), 8));
+	if (err != DPU_OK)
+	{
+		dbg_printf("Error %u copying options\n", err);
+		return -1;
+	}
 
 	// copy the items specific to each DPU
 #ifdef BULK_TRANSFER
@@ -64,25 +92,63 @@ int search_rank(struct dpu_set_t dpu_rank, uint8_t rank_id, struct host_buffer_d
 		}
 
 		// copy the data to the DPU
-		DPU_ASSERT(dpu_copy_to(dpu, "dpu_id", 0, &dpu_id, sizeof(uint32_t)));
-		DPU_ASSERT(dpu_copy_to(dpu, "input_chunk_size", 0, &chunk_size, sizeof(uint32_t)));
-		DPU_ASSERT(dpu_copy_to(dpu, "input_length", 0, &input_length, sizeof(uint32_t)));
+		err = dpu_copy_to(dpu, "dpu_id", 0, &dpu_id, sizeof(uint32_t));
+		if (err != DPU_OK)
+		{
+			dbg_printf("Error %u copying dpu_id\n", err);
+			return -1;
+		}
+		err = dpu_copy_to(dpu, "input_chunk_size", 0, &chunk_size, sizeof(uint32_t));
+		if (err != DPU_OK)
+		{
+			dbg_printf("Error %u copying chunk size\n", err);
+			return -1;
+		}
+		err = dpu_copy_to(dpu, "input_length", 0, &input_length, sizeof(uint32_t));
+		if (err != DPU_OK)
+		{
+			dbg_printf("Error %u copying input_length\n", err);
+			return -1;
+		}
 #ifdef BULK_TRANSFER
-		DPU_ASSERT(dpu_prepare_xfer(dpu, (void*)buffer));
+		err = dpu_prepare_xfer(dpu, (void*)buffer);
+		if (err != DPU_OK)
+		{
+			dbg_printf("Error %u preparing xfer\n", err);
+			return -1;
+		}
+
+		// keep track of the largest length seen so far, since the xfer must be
+		// the size of the largest buffer
 		if (input_length > largest_length)
 			largest_length = input_length;
 #else
-		DPU_ASSERT(dpu_copy_to(dpu, "input_buffer", 0, buffer, ALIGN(input_length, 8)));
+		err = dpu_copy_to(dpu, "input_buffer", 0, buffer, ALIGN(input_length, 8));
+		if (err != DPU_OK)
+		{
+			dbg_printf("Error %u copying input buffer\n", err);
+			return -1;
+		}
 #endif //BULK_TRANSFER
 	}
 
 #ifdef BULK_TRANSFER
 	dbg_printf("Transferring %u bytes\n", ALIGN(largest_length, 8));
-	DPU_ASSERT(dpu_push_xfer(dpu_rank, DPU_XFER_TO_DPU, "input_buffer", 0, ALIGN(largest_length, 8), DPU_XFER_DEFAULT));
+	err = dpu_push_xfer(dpu_rank, DPU_XFER_TO_DPU, "input_buffer", 0, ALIGN(largest_length, 8), DPU_XFER_DEFAULT);
+	if (err != DPU_OK)
+	{
+		dbg_printf("Error %u pushing xfer\n", err);
+		return -1;
+	}
 #endif //BULK_TRANSFER
 
 	// launch all of the DPUs after they have been loaded
-	DPU_ASSERT(dpu_launch(dpu_rank, DPU_ASYNCHRONOUS));
+	err = dpu_launch(dpu_rank, DPU_ASYNCHRONOUS);
+	if (err != DPU_OK)
+	{
+		dbg_printf("Error %u pushing xfer\n", err);
+		return -1;
+	}
 
 	return 0;
 }
@@ -90,6 +156,7 @@ int search_rank(struct dpu_set_t dpu_rank, uint8_t rank_id, struct host_buffer_d
 int read_results_dpu_rank(struct dpu_set_t dpu_rank, struct host_context *output)
 {
 	struct dpu_set_t dpu;
+	dpu_error_t err;
 	uint32_t line_count[NR_TASKLETS];
 	uint32_t match_count[NR_TASKLETS];
 	uint8_t dpu_id;
@@ -101,12 +168,27 @@ int read_results_dpu_rank(struct dpu_set_t dpu_rank, struct host_context *output
 
 #ifdef DEBUG_DPU
 		printf("Retrieving results from %s\n", output->desc[dpu_id].filename);
-		DPU_ASSERT(dpu_log_read(dpu, stdout));
+		err = dpu_log_read(dpu, stdout);
+		if (err != DPU_OK)
+		{
+			dbg_printf("Error %u retrieving log\n", err);
+			return -1;
+		}
 #endif // DEBUG_DPU
 
 		// Get the results back from each individual DPU in the rank
-		DPU_ASSERT(dpu_copy_from(dpu, "line_count", 0, line_count, sizeof(uint32_t) * NR_TASKLETS));
-		DPU_ASSERT(dpu_copy_from(dpu, "match_count", 0, match_count, sizeof(uint32_t) * NR_TASKLETS));
+		err = dpu_copy_from(dpu, "line_count", 0, line_count, sizeof(uint32_t) * NR_TASKLETS);
+		if (err != DPU_OK)
+		{
+			dbg_printf("Error %u getting line count\n", err);
+			return -1;
+		}
+		err = dpu_copy_from(dpu, "match_count", 0, match_count, sizeof(uint32_t) * NR_TASKLETS);
+		if (err != DPU_OK)
+		{
+			dbg_printf("Error %u retrieving match count\n", err);
+			return -1;
+		}
 		//DPU_ASSERT(dpu_copy_from(dpu, "matches", 0, matches, sizeof(uint32_t) * match_count);
 
 		// aggregate the statistics
@@ -122,7 +204,7 @@ int read_results_dpu_rank(struct dpu_set_t dpu_rank, struct host_context *output
 
 int check_for_completed_rank(struct dpu_set_t dpus, uint64_t* rank_status, struct host_context ctx[], host_results *results)
 {
-	struct dpu_set_t dpu_rank;
+	struct dpu_set_t dpu_rank, dpu;
 	uint8_t rank_id=0;
 
 	DPU_RANK_FOREACH(dpus, dpu_rank)
@@ -131,14 +213,42 @@ int check_for_completed_rank(struct dpu_set_t dpus, uint64_t* rank_status, struc
 
 		if (*rank_status & ((uint64_t)1<<rank_id))
 		{
+			uint32_t dpu_id;
+			struct host_context* rank_ctx = &ctx[rank_id];
+
 			// check to see if anything has completed
 			dpu_status(dpu_rank, &done, &fault);
+			if (fault)
+			{
+				bool dpu_done, dpu_fault;
+				printf("rank %u fault - abort!\n", rank_id);
+
+				// try to find which DPU caused the fault
+				DPU_FOREACH(dpu_rank, dpu, dpu_id)
+				{
+					dpu_status(dpu, &dpu_done, &dpu_fault);
+					if (dpu_fault)
+						printf("[%u:%u] at fault\n", rank_id, dpu_id);
+				}
+
+				// free the associated memory
+				for (dpu_id=0; dpu_id < rank_ctx->used; dpu_id++)
+				{
+					printf("%s\n", rank_ctx->desc[dpu_id].filename);
+
+					// free the memory of the descriptor
+					free(rank_ctx->desc[dpu_id].filename);
+					free(rank_ctx->desc[dpu_id].buffer);
+				}
+				free(rank_ctx->desc);
+
+				return -2;
+			}
+
 			if (done)
 			{
-				uint32_t dpu_id;
-				struct host_context* rank_ctx = &ctx[rank_id];
 				*rank_status &= ~((uint64_t)1<<rank_id);
-				dbg_printf("Reading results from rank %u descriptor %p\n", rank_id, rank_ctx->desc);
+				dbg_printf("Reading results from rank %u status %s\n", rank_id, to_bin(*rank_status, rank_count));
 				read_results_dpu_rank(dpu_rank, rank_ctx);
 				for (dpu_id=0; dpu_id < rank_ctx->used; dpu_id++)
 				{
@@ -151,12 +261,6 @@ int check_for_completed_rank(struct dpu_set_t dpus, uint64_t* rank_status, struc
 					free(rank_ctx->desc[dpu_id].buffer);
 				}
 				free(rank_ctx->desc);
-
-			}
-			if (fault)
-			{
-				printf("rank %u fault - abort!\n", rank_id);
-				return -2;
 			}
 		}
 		rank_id++;
@@ -413,38 +517,39 @@ int main(int argc, char **argv)
 			prepared_file_count++;
 		}
 
-		dbg_printf("Prepared %u input descriptors in %p\n", prepared_file_count, input);
+		dbg_printf("Prepared %u input descriptors in %p status=%s\n", prepared_file_count, input, to_bin(rank_status, rank_count));
 		submitted = 0;
 		while (!submitted)
 		{
+			while (rank_status == 0x1FF)
+			{
+				dbg_printf("Waiting for a free rank\n");
+				int ret = check_for_completed_rank(dpus, &rank_status, ctx, &results);
+				if (ret == -2)
+				{
+					printf("A rank has faulted\n");
+					status = GREP_FAULT;
+					goto done;
+				}
+			}
+
 			// submit those files to a free rank
-			rank_id = 0;
-			DPU_RANK_FOREACH(dpus, dpu_rank)
+			DPU_RANK_FOREACH(dpus, dpu_rank, rank_id)
 			{
 				if (!(rank_status & ((uint64_t)1<<rank_id)))
 				{
 					rank_status |= ((uint64_t)1<<rank_id);
-					dbg_printf("Submitted to rank %u status=0x%lx descriptors %p\n", rank_id, rank_status, input);
+					dbg_printf("Submitted to rank %u status=%s\n", rank_id, to_bin(rank_status, rank_count));
 					status = search_rank(dpu_rank, rank_id, input, prepared_file_count, pattern, &opts);
 					ctx[rank_id].desc = input;
 					ctx[rank_id].used = prepared_file_count;
 					submitted = 1;
 					break;
 				}
-				rank_id++;
 			}
 
-			// as long as we have submitted some files, don't look for finished DPUs
-			if (submitted)
-				break;
-
-			int ret = check_for_completed_rank(dpus, &rank_status, ctx, &results);
-			if (ret == -2)
-			{
-				printf("A rank has faulted\n");
-				status = GREP_FAULT;
-				goto done;
-			}
+			if (!submitted)
+				printf("ERROR: failed to submit\n");
 		}
 	}
 
