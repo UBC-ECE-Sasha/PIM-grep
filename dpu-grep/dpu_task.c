@@ -60,7 +60,7 @@ int main()
 
 	// wait for all tasks to finish
 	//printf("[%u] completed in %ld cycles\n", task_id, perfcounter_get());
-	dbg_printf("%u matches in %u lines\n", match_count[task_id], line_count[task_id]);
+	//dbg_printf("%u matches in %u lines\n", match_count[task_id], line_count[task_id]);
 	return 0;
 }
 
