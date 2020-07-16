@@ -20,11 +20,17 @@
 #define MAX_PATTERN 63
 #define TEMP_LENGTH 256
 
+// to extract components from dpu_id_t
+#define DPU_ID_RANK(_x) ((_x >> 16) & 0xFF)
+#define DPU_ID_SLICE(_x) ((_x >> 8) & 0xFF)
+#define DPU_ID_DPU(_x) ((_x) & 0xFF)
+
 const char options[]="A:B:cdt:";
 static char dummy_buffer[MAX_INPUT_LENGTH];
 static uint32_t rank_count, dpu_count;
 static uint32_t dpus_per_rank;
 
+#ifdef DEBUG
 static char* to_bin(uint64_t i, uint8_t length)
 {
 	uint8_t outchar;
@@ -37,6 +43,7 @@ static char* to_bin(uint64_t i, uint8_t length)
 	outstr[outchar] = 0;
 	return outstr;
 }
+#endif // DEBUG
 
 int search_rank(struct dpu_set_t dpu_rank, uint8_t rank_id, struct host_buffer_descriptor input[], 
 	uint8_t count, const char* pattern, struct grep_options* opts)
@@ -224,11 +231,19 @@ int check_for_completed_rank(struct dpu_set_t dpus, uint64_t* rank_status, struc
 				printf("rank %u fault - abort!\n", rank_id);
 
 				// try to find which DPU caused the fault
-				DPU_FOREACH(dpu_rank, dpu, dpu_id)
+				DPU_FOREACH(dpu_rank, dpu)
 				{
 					dpu_status(dpu, &dpu_done, &dpu_fault);
 					if (dpu_fault)
-						printf("[%u:%u] at fault\n", rank_id, dpu_id);
+					{
+						dpu_id_t id = dpu_get_id(dpu.dpu);
+						fprintf(stderr, "[%u:%u:%u] at fault\n", DPU_ID_RANK(id), DPU_ID_SLICE(id), DPU_ID_DPU(id));
+#ifdef DEBUG_DPU
+						fprintf(stderr, "Halting for debug");
+						while (1)
+							usleep(100000);
+#endif // DEBUG_DPU
+					}
 				}
 
 				// free the associated memory
@@ -336,6 +351,7 @@ int main(int argc, char **argv)
 	struct grep_options opts;
 	struct dpu_set_t dpus, dpu_rank;
 	host_results results;
+	char dpu_program_name[32];
 
 	memset(&results, 0, sizeof(host_results));
 	memset(&opts, 0, sizeof(struct grep_options));
@@ -463,7 +479,8 @@ int main(int argc, char **argv)
 		dpus_per_rank = dpu_count/rank_count;
 		dbg_printf("Got %u dpus across %u ranks (%u dpus per rank)\n", dpu_count, rank_count, dpus_per_rank);
 
-		DPU_ASSERT(dpu_load(dpus, DPU_PROGRAM, NULL));
+		snprintf(dpu_program_name, 31, "%s-%u", DPU_PROGRAM, NR_TASKLETS);
+		DPU_ASSERT(dpu_load(dpus, dpu_program_name, NULL));
 
 		if (rank_count > 64)
 		{
@@ -559,7 +576,10 @@ int main(int argc, char **argv)
 	{
 		int ret = check_for_completed_rank(dpus, &rank_status, ctx, &results);
 		if (ret == -2)
+		{
+			status = GREP_FAULT;
 			goto done;
+		}
 		usleep(1);
 	}
 
