@@ -2,9 +2,11 @@ CC           = dpu-upmem-dpurte-clang
 CFLAGS       = -O2 -flto -g -Wall
 
 NR_TASKETS=1
-STACK_SIZE_DEFAULT = 256
+STACK_SIZE_DEFAULT = 128
+SEQREAD_CACHE_SIZE=256
 CFLAGS += -DNR_TASKLETS=$(NR_TASKLETS)
 CFLAGS += -DSTACK_SIZE_DEFAULT=$(STACK_SIZE_DEFAULT)
+CFLAGS += -DSEQREAD_CACHE_SIZE=$(SEQREAD_CACHE_SIZE)
 CFLAGS += -I../PIM-common/common/include
 
 # define DEBUG in the source if we are debugging
@@ -25,5 +27,5 @@ clean:
 	$(RM) $(TARGET_DPU)
 
 $(TARGET_DPU): $(SOURCES)
-	$(CC) $(CFLAGS)  $^ -o $@
+	$(CC) $(CFLAGS)  $^ -o $@-$(NR_TASKLETS)
 
