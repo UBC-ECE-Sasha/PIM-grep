@@ -26,6 +26,7 @@ struct grep_options
 	uint8_t out_before;	/* Lines of leading context. */
 	uint8_t out_after;	/* Lines of trailing context. */
 	uint32_t flags;		/* most other single-bit options */
+	uint32_t max_files;	/* stop processing after this many files */
 }__attribute__((aligned(8)));
 
 typedef struct host_buffer_descriptor
@@ -49,6 +50,7 @@ typedef struct host_results
 {
 	uint32_t total_line_count;
 	uint32_t total_match_count;
+	uint32_t total_files;
 } host_results;
 
 #endif	/* _GREP_HOST_H_ */

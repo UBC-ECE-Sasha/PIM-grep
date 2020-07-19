@@ -25,7 +25,7 @@
 #define DPU_ID_SLICE(_x) ((_x >> 8) & 0xFF)
 #define DPU_ID_DPU(_x) ((_x) & 0xFF)
 
-const char options[]="A:B:cdt:";
+const char options[]="A:B:cdm:t:";
 static char dummy_buffer[MAX_INPUT_LENGTH];
 static uint32_t rank_count, dpu_count;
 static uint32_t dpus_per_rank;
@@ -265,6 +265,7 @@ int check_for_completed_rank(struct dpu_set_t dpus, uint64_t* rank_status, struc
 				*rank_status &= ~((uint64_t)1<<rank_id);
 				dbg_printf("Reading results from rank %u status %s\n", rank_id, to_bin(*rank_status, rank_count));
 				read_results_dpu_rank(dpu_rank, rank_ctx);
+				results->total_files += rank_ctx->used;
 				for (dpu_id=0; dpu_id < rank_ctx->used; dpu_id++)
 				{
 					printf("%s:%u\n", rank_ctx->desc[dpu_id].filename, rank_ctx->desc[dpu_id].match_count);
@@ -355,6 +356,7 @@ int main(int argc, char **argv)
 
 	memset(&results, 0, sizeof(host_results));
 	memset(&opts, 0, sizeof(struct grep_options));
+	opts.max_files = -1; // no effective maximum by default
 
 	while ((opt = getopt(argc, argv, options)) != -1)
 	{
@@ -375,6 +377,10 @@ int main(int argc, char **argv)
 
 		case 'd':
 			use_dpu = 1;
+			break;
+
+		case 'm':
+			opts.max_files = strtoul(optarg, NULL, 0);
 			break;
 
 		case 't':
@@ -455,6 +461,12 @@ int main(int argc, char **argv)
 		printf("No input files!\n");
 		usage(argv[0]);
 		return -1;
+	}
+
+	if (input_file_count > opts.max_files)
+	{
+		input_file_count = opts.max_files;
+		dbg_printf("Limiting input files to %u\n", input_file_count);
 	}
 
 #ifdef BULK_TRANSFER
@@ -594,6 +606,7 @@ done:
 
 	printf("Total line count: %u\n", results.total_line_count);
 	printf("Total matches: %u\n", results.total_match_count);
+	printf("Total files: %u\n", results.total_files);
 
 	return 0;
 }
