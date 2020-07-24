@@ -35,6 +35,9 @@ int main()
 		//dbg_printf("[%u:%u]: input chunk size: %u\n", dpu_id, task_id, input_chunk_size);
 		//dbg_printf("[%u.%u]: pattern length: %u\n", dpu_id, task_id, pattern_length);
 		//dbg_printf("[%u.%u]: pattern: %s\n", dpu_id, task_id, pattern);
+
+		// clear the heap
+		mem_reset();
 	}
 	
 	// Prepare the input and output descriptors
