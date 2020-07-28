@@ -11,10 +11,11 @@ enum {
 	GREP_FAULT
 };
 
-enum
+enum option_flags
 {
 	OPTION_FLAG_COUNT_MATCHES,
 	OPTION_FLAG_OUT_BYTE,
+	OPTION_FLAG_MULTIPLE_FILES, // multiple files per DPU
 };
 
 /* Try to match the original grep options as closely as possible.
@@ -25,26 +26,33 @@ struct grep_options
 {
 	uint8_t out_before;	/* Lines of leading context. */
 	uint8_t out_after;	/* Lines of trailing context. */
-	uint32_t flags;		/* most other single-bit options */
+	uint32_t flags;		/* most other single-bit options (see OPTION_FLAG_) */
 	uint32_t max_files;	/* stop processing after this many files */
 }__attribute__((aligned(8)));
 
-typedef struct host_buffer_descriptor
+typedef struct host_file_descriptor
 {
 	char *filename;
-	char *buffer;
-	char *curr;
+	uint32_t start; 	// offset into host_dpu_descriptor.buffer
 	uint32_t length;
 	uint32_t max;
 	uint32_t line_count; // total lines in the file
 	uint32_t match_count; // total matches of the search term
-} host_buffer_descriptor;
+} host_file_descriptor;
 
-typedef struct host_context
+typedef struct host_dpu_descriptor
 {
-	uint32_t used; // how many descriptors are used in the descriptor array
-	host_buffer_descriptor *desc; // the variable size descriptor array
-} host_context;
+	uint32_t file_count; // how many files are processed by this DPU
+	uint32_t total_length; // size of the concatenated buffer
+	char *buffer; // concatenated buffer for this DPU
+	host_file_descriptor files[NR_TASKLETS];
+} host_dpu_descriptor;
+
+typedef struct host_rank_context
+{
+	uint32_t dpu_count; // how many dpus are filled in the descriptor array
+	host_dpu_descriptor *dpus; // the descriptors for the dpus in this rank
+} host_rank_context;
 
 typedef struct host_results
 {

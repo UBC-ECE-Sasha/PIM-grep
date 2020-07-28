@@ -11,65 +11,13 @@ extern char pattern[64];
 extern uint32_t pattern_length;
 extern struct grep_options options;
 
-/* Flags controlling the style of output. */
-/*static enum
-{
-  BINARY_BINARY_FILES,
-  TEXT_BINARY_FILES,
-  WITHOUT_MATCH_BINARY_FILES
-} binary_files;		 How to handle binary files.  */
-
-/* Options for output as a list of matching/non-matching files */
-/*static enum
-{
-  LISTFILES_NONE,
-  LISTFILES_MATCHING,
-  LISTFILES_NONMATCHING,
-} list_files; */
-
-//static int filename_mask;	/* If zero, output nulls after filenames.  */
-//static bool out_quiet;		/* Suppress all normal output. */
-//static bool out_invert;		/* Print nonmatching stuff. */
-//static bool out_line;		/* Print line numbers. */
-//static bool out_byte;		/* Print byte offsets. */
-//static intmax_t max_count;	/* Max number of selected
-//                                   lines from an input file.  */
-//static bool line_buffered;	/* Use line buffering.  */
-
-/* Internal variables to keep track of byte count, context, etc. */
-//static uintmax_t totalcc;	/* Total character count before bufbeg. */
-//static char const *lastnl;	/* Pointer after last newline counted. */
-//static char *lastout;		/* Pointer after last character output;
-//                                   NULL if no character has been output
-//                                   or if it's conceptually before bufbeg. */
-//static intmax_t outleft;	/* Maximum number of selected lines.  */
-//static intmax_t pending;	/* Pending lines of output.
-//                                   Always kept 0 if out_quiet is true.  */
-//static bool dev_null_output;	/* Stdout is known to be /dev/null.  */
-//static bool binary;		/* Use binary rather than text I/O.  */
-
-//static char *buffer;		/* Base of buffer. */
-//static size_t bufalloc;		/* Allocated buffer size, counting slop. */
-//static int bufdesc;		/* File descriptor. */
-//static char *bufbeg;		/* Beginning of user-visible stuff. */
-//static char *buflim;		/* Limit of user-visible stuff. */
-//static size_t pagesize;		/* alignment of memory pages */
-//static off_t bufoffset;		/* Read offset.  */
-/*static off_t after_last_match;	 Pointer after last matching line that
-                                   would have been output if we were
-                                   outputting characters. */
-/*static bool skip_empty_lines;	 Skip empty lines in data.  */
-
 static unsigned char READ_BYTE(struct in_buffer_context *_i)
 {
 	uint8_t ret = *_i->ptr;
 	_i->ptr = seqread_get(_i->ptr, sizeof(uint8_t), &_i->sr);
-	//_i->curr++;
 	return ret;
 }
 
-/* Search a given (non-directory) file.  Return a count of lines printed.
-   Set *INEOF to true if end-of-file reached.  */
 uint32_t grep(struct in_buffer_context *buf, uint32_t *line_count)
 {
 	uint8_t p_index = 0;
