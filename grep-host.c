@@ -10,7 +10,9 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <getopt.h>
+#include <sys/time.h>
 
+#include <host.h>
 #include "grep-host.h"
 
 #define DPU_PROGRAM "dpu-grep/grep.dpu"
@@ -386,6 +388,10 @@ int main(int argc, char **argv)
 	struct dpu_set_t dpus, dpu_rank;
 	host_results results;
 	char dpu_program_name[32];
+#ifdef STATISTICS
+	double total_time;
+	struct timeval start, stop;
+#endif // STATISTICS
 
 	memset(&results, 0, sizeof(host_results));
 	memset(&opts, 0, sizeof(struct grep_options));
@@ -707,10 +713,15 @@ done:
 	}
 
 #ifdef STATISTICS
+	total_time = TIME_DIFFERENCE(stop, start);
+	printf("Sequential reader size: %u\n", SEQREAD_CACHE_SIZE);
+	printf("Number of DPUs: %u\n", dpu_count);
+	printf("Number of ranks: %u\n", rank_count);
 	printf("Total line count: %u\n", results.total_line_count);
 	printf("Total matches: %u\n", results.total_match_count);
 	printf("Total files: %u\n", results.total_files);
 	printf("Total data processed: %lu\n", total_data_processed);
+	printf("Total time: %0.2fs\n", total_time);
 	printf("Total DPUs launched: %lu\n", total_dpus_launched);
 	printf("Average utilization per DPU: %2.3f\n", (double)total_data_processed / (double)total_dpus_launched / (double)TOTAL_MRAM);
 #endif // STATISTICS

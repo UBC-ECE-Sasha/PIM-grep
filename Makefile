@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = --std=c99 -O3 -g -Wall -Wextra -I PIM-common/common/include
+CFLAGS = --std=c99 -O3 -g -Wall -Wextra -I PIM-common/common/include -I PIM-common/host/include -DSEQREAD_CACHE_SIZE=$(SEQREAD_CACHE_SIZE)
 DPU_OPTS = `dpu-pkg-config --cflags --libs dpu`
 
 # define DEBUG in the source if we are debugging
