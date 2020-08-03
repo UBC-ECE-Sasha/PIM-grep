@@ -587,12 +587,12 @@ int main(int argc, char **argv)
 			{
 				dpu_id++;
 				dpu_id%=dpus_per_rank;
-				dbg_printf("Searching DPU %u file count=%u, est final length=%lu\n",
-					dpu_id, rank_input[dpu_id].file_count, rank_input[dpu_id].total_length + file_length);
+				dbg_printf("Searching DPU %u\n", dpu_id);
 				if (rank_input[dpu_id].file_count < NR_TASKLETS &&
 					(rank_input[dpu_id].total_length + file_length < MAX_INPUT_LENGTH))
 				{
-					dbg_printf("Using DPU %u\n", dpu_id);
+					dbg_printf("Using DPU %u file count=%u, est final length=%lu\n",
+						dpu_id, rank_input[dpu_id].file_count, rank_input[dpu_id].total_length + file_length);
 					host_file_descriptor *input = &rank_input[dpu_id].files[rank_input[dpu_id].file_count];
 
 					// prepare the input buffer descriptor
