@@ -626,6 +626,9 @@ int main(int argc, char **argv)
 			}
 		}
 
+		free(input_files);
+		input_files = NULL;
+
 		dbg_printf("Prepared %u files in %u DPUs status=%s\n", prepared_file_count, prepared_dpu_count, to_bin(rank_status, rank_count));
 		submitted = 0;
 		while (!submitted)
