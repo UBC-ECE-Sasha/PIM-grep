@@ -24,7 +24,7 @@ default: all
 all: $(TARGET_DPU)
 
 clean:
-	$(RM) $(TARGET_DPU)
+	$(RM) $(TARGET_DPU)-*
 
 $(TARGET_DPU): $(SOURCES)
 	$(CC) $(CFLAGS)  $^ -o $@-$(NR_TASKLETS)

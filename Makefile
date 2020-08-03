@@ -35,7 +35,7 @@ default: all
 all: dpu host
 
 clean:
-	$(RM) grep
+	$(RM) host-*
 	$(MAKE) -C dpu-grep $@
 
 dpu:
