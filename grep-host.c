@@ -32,6 +32,11 @@ static char dummy_buffer[MAX_INPUT_LENGTH];
 static uint32_t rank_count, dpu_count;
 static uint32_t dpus_per_rank;
 
+#ifdef STATISTICS
+static uint64_t total_data_processed;
+static uint64_t total_dpus_launched;
+#endif // STATISTICS
+
 #ifdef DEBUG
 static char* to_bin(uint64_t i, uint8_t length)
 {
@@ -615,10 +620,19 @@ int main(int argc, char **argv)
 
 					// if this is the first file for this DPU, mark the DPU as used
 					if (rank_input[dpu_id].file_count == 0)
+					{
 						prepared_dpu_count++;
+#ifdef STATISTICS
+						total_dpus_launched++;
+#endif // STATISTICS
+					}
+
 					rank_input[dpu_id].file_count++;
 					rank_input[dpu_id].total_length += file_length;// if we need alignment, do it here
  					prepared_file_count++;
+#ifdef STATISTICS
+					total_data_processed += file_length;
+#endif // STATISTICS
 					break;
 				}
 			}
@@ -692,9 +706,14 @@ done:
 		exit(EXIT_FAILURE);
 	}
 
+#ifdef STATISTICS
 	printf("Total line count: %u\n", results.total_line_count);
 	printf("Total matches: %u\n", results.total_match_count);
 	printf("Total files: %u\n", results.total_files);
+	printf("Total data processed: %lu\n", total_data_processed);
+	printf("Total DPUs launched: %lu\n", total_dpus_launched);
+	printf("Average utilization per DPU: %lu\n", total_data_processed / total_dpus_launched / TOTAL_MRAM);
+#endif // STATISTICS
 
 	return 0;
 }

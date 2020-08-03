@@ -20,10 +20,17 @@ NR_DPUS = 1
 # Bulk (dpu_prepare_xfer) is default
 BULK = 1
 
+# Statistics are on by default
+STATS = 1
+
 SEQREAD_CACHE_SIZE=128
 
 ifeq ($(BULK), 1)
 	CFLAGS+=-DBULK_TRANSFER
+endif
+
+ifeq ($(STATS), 1)
+	CFLAGS+=-DSTATISTICS
 endif
 
 SOURCE = grep-host.c
@@ -42,7 +49,7 @@ dpu:
 	DEBUG=$(DEBUG_DPU) NR_DPUS=$(NR_DPUS) NR_TASKLETS=$(NR_TASKLETS) SEQREAD_CACHE_SIZE=$(SEQREAD_CACHE_SIZE) $(MAKE) -C dpu-grep
 
 host: $(SOURCE)
-	$(CC) $(CFLAGS) -DNR_DPUS=$(NR_DPUS) -DNR_TASKLETS=$(NR_TASKLETS) $^ -o $@-$(NR_TASKLETS) $(DPU_OPTS)
+	$(CC) $(CFLAGS) -DNR_TASKLETS=$(NR_TASKLETS) $^ -o $@-$(NR_TASKLETS) $(DPU_OPTS)
 
 tags:
 	ctags -R -f tags . ~/projects/upmem/upmem-sdk
