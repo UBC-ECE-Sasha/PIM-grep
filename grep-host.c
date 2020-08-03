@@ -712,7 +712,7 @@ done:
 	printf("Total files: %u\n", results.total_files);
 	printf("Total data processed: %lu\n", total_data_processed);
 	printf("Total DPUs launched: %lu\n", total_dpus_launched);
-	printf("Average utilization per DPU: %lu\n", total_data_processed / total_dpus_launched / TOTAL_MRAM);
+	printf("Average utilization per DPU: %2.3f\n", (double)total_data_processed / (double)total_dpus_launched / (double)TOTAL_MRAM);
 #endif // STATISTICS
 
 	return 0;
