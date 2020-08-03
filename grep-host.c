@@ -552,7 +552,7 @@ int main(int argc, char **argv)
 	{
 		struct host_dpu_descriptor *rank_input;
 		uint8_t dpu_id=0;
-		uint8_t prepared_file_count;
+		uint32_t prepared_file_count;
 		uint8_t prepared_dpu_count=0;
 		rank_input = calloc(dpus_per_rank, sizeof(struct host_dpu_descriptor));
 
