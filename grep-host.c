@@ -579,6 +579,11 @@ int main(int argc, char **argv)
 			stat(filename, &st);
 			uint64_t file_length = st.st_size;
 			dbg_printf("Allocating %s (%lu)\n", filename, file_length);
+			if (file_length > MAX_INPUT_LENGTH)
+			{
+				dbg_printf("Skipping file %s (%lu > %u)\n", input_files[file_index], file_length, MAX_INPUT_LENGTH);
+				continue;
+			}
 
 			// find a free slot among the DPUs
 			// 'free' means number of tasklets and free memory
