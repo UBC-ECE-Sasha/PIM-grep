@@ -626,9 +626,6 @@ int main(int argc, char **argv)
 			}
 		}
 
-		free(input_files);
-		input_files = NULL;
-
 		dbg_printf("Prepared %u files in %u DPUs status=%s\n", prepared_file_count, prepared_dpu_count, to_bin(rank_status, rank_count));
 		submitted = 0;
 		while (!submitted)
@@ -663,6 +660,10 @@ int main(int argc, char **argv)
 				printf("ERROR: failed to submit\n");
 		}
 	}
+
+	dbg_printf("Freeing input files\n");
+	free(input_files);
+	input_files = NULL;
 
 	// all files have been submitted; wait for all jobs to finish
 	dbg_printf("Waiting for all DPUs to finish\n");
