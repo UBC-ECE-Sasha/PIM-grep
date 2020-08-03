@@ -20,7 +20,7 @@
 #define MIN_CHUNK_SIZE 256 // not worthwhile making another tasklet work for data less than this
 #define MAX_PATTERN 63
 #define TEMP_LENGTH 256
-#define ALL_RANKS (rank_count == 64 ? 0xFFFFFFFFFFFFFFFF : (1ULL<<rank_status) - 1)
+#define ALL_RANKS (rank_count == 64 ? 0xFFFFFFFFFFFFFFFF : (1UL<<rank_count) - 1)
 
 // to extract components from dpu_id_t
 #define DPU_ID_RANK(_x) ((_x >> 16) & 0xFF)
