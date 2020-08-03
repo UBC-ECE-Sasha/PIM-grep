@@ -15,8 +15,8 @@
 
 #define DPU_PROGRAM "dpu-grep/grep.dpu"
 #define TOTAL_MRAM MEGABYTE(32)
-#define MAX_INPUT_LENGTH MEGABYTE(31)
-#define MAX_OUTPUT_LENGTH (TOTAL_MRAM - MAX_INPUT_LENGTH)
+#define MAX_OUTPUT_LENGTH MEGABYTE(1)
+#define MAX_INPUT_LENGTH (TOTAL_MRAM - MAX_OUTPUT_LENGTH)
 #define MIN_CHUNK_SIZE 256 // not worthwhile making another tasklet work for data less than this
 #define MAX_PATTERN 63
 #define TEMP_LENGTH 256
