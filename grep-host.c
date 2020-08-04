@@ -10,7 +10,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <getopt.h>
-#include <sys/time.h>
+#include <time.h>
 
 #include <host.h>
 #include "grep-host.h"
@@ -388,9 +388,16 @@ int main(int argc, char **argv)
 	struct dpu_set_t dpus, dpu_rank;
 	host_results results;
 	char dpu_program_name[32];
+
 #ifdef STATISTICS
 	double total_time;
-	struct timeval start, stop;
+	struct timespec start, stop;
+
+	if (clock_gettime(CLOCK_MONOTONIC, &start) < 0)
+	{
+		printf("Error getting time\n");
+		return -10;
+	}
 #endif // STATISTICS
 
 	memset(&results, 0, sizeof(host_results));
@@ -713,7 +720,8 @@ done:
 	}
 
 #ifdef STATISTICS
-	total_time = TIME_DIFFERENCE(stop, start);
+	clock_gettime(CLOCK_MONOTONIC, &stop);
+	total_time = TIME_DIFFERENCE(start, stop);
 	printf("Sequential reader size: %u\n", SEQREAD_CACHE_SIZE);
 	printf("Number of DPUs: %u\n", dpu_count);
 	printf("Number of ranks: %u\n", rank_count);
