@@ -23,7 +23,7 @@ BULK = 1
 # Statistics are on by default
 STATS = 1
 
-SEQREAD_CACHE_SIZE=128
+SEQREAD_CACHE_SIZE=256
 
 ifeq ($(BULK), 1)
 	CFLAGS+=-DBULK_TRANSFER
