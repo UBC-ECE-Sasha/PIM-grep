@@ -14,16 +14,13 @@ endif
 # Default NR_TASKLETS
 NR_TASKLETS = 16
 
-# Default number of DPUs
-NR_DPUS = 1
-
 # Bulk (dpu_prepare_xfer) is default
 BULK = 1
 
 # Statistics are on by default
 STATS = 1
-
 SEQREAD_CACHE_SIZE=256
+MAX_FILES_PER_DPU=64
 
 ifeq ($(BULK), 1)
 	CFLAGS+=-DBULK_TRANSFER
@@ -46,10 +43,10 @@ clean:
 	$(MAKE) -C dpu-grep $@
 
 dpu:
-	DEBUG=$(DEBUG_DPU) NR_DPUS=$(NR_DPUS) NR_TASKLETS=$(NR_TASKLETS) SEQREAD_CACHE_SIZE=$(SEQREAD_CACHE_SIZE) $(MAKE) -C dpu-grep
+	DEBUG=$(DEBUG_DPU) NR_TASKLETS=$(NR_TASKLETS) SEQREAD_CACHE_SIZE=$(SEQREAD_CACHE_SIZE) MAX_FILES_PER_DPU=$(MAX_FILES_PER_DPU)  $(MAKE) -C dpu-grep
 
 host: $(SOURCE)
-	$(CC) $(CFLAGS) -DNR_TASKLETS=$(NR_TASKLETS) $^ -o $@-$(NR_TASKLETS) $(DPU_OPTS)
+	$(CC) $(CFLAGS) -DNR_TASKLETS=$(NR_TASKLETS) -DMAX_FILES_PER_DPU=$(MAX_FILES_PER_DPU) $^ -o $@-$(NR_TASKLETS) $(DPU_OPTS)
 
 tags:
 	ctags -R -f tags . ~/projects/upmem/upmem-sdk

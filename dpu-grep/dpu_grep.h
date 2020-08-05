@@ -35,7 +35,7 @@ typedef struct out_buffer_context
 	uint32_t length; // total size of output buffer in bytes 
 } out_buffer_context;
 
-uint32_t grep(struct in_buffer_context *buf, uint32_t *line_count);
+uint32_t grep(struct in_buffer_context *buf, uint32_t start, uint32_t file_id);
 
 #endif
 

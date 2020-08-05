@@ -9,7 +9,12 @@
 
 extern char pattern[64];
 extern uint32_t pattern_length;
+extern uint32_t file_count;
 extern struct grep_options options;
+extern uint32_t file_size[MAX_FILES_PER_DPU];
+extern uint32_t file_start[MAX_FILES_PER_DPU];
+extern uint32_t line_count[MAX_FILES_PER_DPU];
+extern uint32_t match_count[MAX_FILES_PER_DPU];
 
 static unsigned char READ_BYTE(struct in_buffer_context *_i)
 {
@@ -18,22 +23,32 @@ static unsigned char READ_BYTE(struct in_buffer_context *_i)
 	return ret;
 }
 
-uint32_t grep(struct in_buffer_context *buf, uint32_t *line_count)
+uint32_t grep(struct in_buffer_context *buf, uint32_t start, uint32_t file_id)
 {
+	uint32_t i;
 	uint8_t p_index = 0;
-	uint32_t match_count = 0;
 	uint32_t prev_match_line = -1;
 #ifdef DEBUG
 	uint8_t task_id = me();
 #endif // DEBUG
 
-	for (uint32_t i=0; i < buf->length; i++)
+	for (i=0; i < buf->length; i++)
 	{
 		char c = READ_BYTE(buf);
 
+		// if we are past the end of the file, go to the next one
+		if (start + i > file_size[file_id])
+		{
+			file_id++;
+			if (file_id == file_count)
+				return 0;
+			p_index = 0;
+			prev_match_line = -1;
+		}
+
 		// is this a newline?
 		if (c == '\n')
-			(*line_count)++;
+			line_count[file_id]++;
 
 		if (pattern[p_index++] != c)
 			p_index = 0;
@@ -44,7 +59,7 @@ uint32_t grep(struct in_buffer_context *buf, uint32_t *line_count)
 			// post-increment of the index in the 'if' statement above.
 			if (p_index == pattern_length)
 			{
-				dbg_printf("[%u]: found at line +%u\n", task_id, *line_count);
+				dbg_printf("[%u]: match in file %u\n", task_id, file_id);
 				p_index = 0;
 
 				if (IS_OPTION_SET(&options, OPTION_FLAG_COUNT_MATCHES))
@@ -52,7 +67,7 @@ uint32_t grep(struct in_buffer_context *buf, uint32_t *line_count)
 					// only count unique lines that match
 					if (*line_count != prev_match_line)
 					{
-						match_count++;
+						match_count[file_id]++;
 						prev_match_line = *line_count;
 					}
 				}
@@ -75,17 +90,23 @@ uint32_t grep(struct in_buffer_context *buf, uint32_t *line_count)
 
 	while (p_index)
 	{
+		i++; // continue to use the byte counter from the previous for loop
 		char c = READ_BYTE(buf);
+
+		// if we are past the end of the file,  we're done
+		if (start + i > file_size[file_id])
+			break;
+
 		if (pattern[p_index++] != c)
 			break;
 		if (p_index == pattern_length)
 		{
-			dbg_printf("[%u]: found at line +%u\n", task_id, *line_count);
-			match_count++;
+			dbg_printf("[%u]: match in file %u\n", task_id, file_id);
+			match_count[file_id]++;
 			break;
 		}
 	}
 
 done:
-	return match_count;
+	return 0;
 }

@@ -55,21 +55,25 @@ static char* to_bin(uint64_t i, uint8_t length)
 #endif // DEBUG
 
 int search_rank(struct dpu_set_t dpu_rank, uint8_t rank_id, struct host_dpu_descriptor input[], 
-	uint8_t count, const char* pattern, struct grep_options* opts)
+	uint32_t file_count, uint32_t used_dpus, const char* pattern, struct grep_options* opts)
 {
 	struct dpu_set_t dpu;
 	dpu_error_t err;
 	uint32_t dpu_id=0; // the id of the DPU inside the rank (0-63)
 	uint32_t pattern_length = strlen(pattern);
+	uint32_t chunk_size;
 	UNUSED(rank_id);
 
-	for (dpu_id=0; dpu_id < count; dpu_id++)
+	for (dpu_id=0; dpu_id < used_dpus; dpu_id++)
 	{
 		uint32_t file;
 		dbg_printf("[%u] file count=%u\n", dpu_id, input[dpu_id].file_count);
 		for (file=0; file < input[dpu_id].file_count; file++)
 		{
-			dbg_printf("	file: %s start=%u length=%u\n", input[dpu_id].files[file].filename, input[dpu_id].files[file].start, input[dpu_id].files[file].length);
+			dbg_printf("	file: %s start=%u length=%u\n",
+				input[dpu_id].files[file].filename,
+				input[dpu_id].files[file].start,
+				input[dpu_id].files[file].length);
 		}
 	}
 
@@ -100,19 +104,21 @@ int search_rank(struct dpu_set_t dpu_rank, uint8_t rank_id, struct host_dpu_desc
 	const char* buffer;
 	DPU_FOREACH(dpu_rank, dpu, dpu_id)
 	{
-		uint32_t chunk_size[NR_TASKLETS];
-		uint32_t input_start[NR_TASKLETS];
-		uint32_t total_length;
+		uint32_t input_size[MAX_FILES_PER_DPU]; // the length of each file
+		uint32_t input_start[MAX_FILES_PER_DPU]; // the start offset of each file in the shared buffer
+		uint32_t buffer_length;
 
-		if (dpu_id < count)
+		if (dpu_id < used_dpus)
 		{
-			total_length = MIN(MAX_INPUT_LENGTH, input[dpu_id].total_length);
-			//chunk_size = MAX(MIN_CHUNK_SIZE, ALIGN(total_length / NR_TASKLETS, 16));
+			buffer_length = MIN(MAX_INPUT_LENGTH, input[dpu_id].total_length);
 			buffer = input[dpu_id].buffer;
+			// calculate an equal amount of work that each tasklet should do
+			chunk_size = MAX(MIN_CHUNK_SIZE, ALIGN(buffer_length / NR_TASKLETS, 8));
 		}
 		else
 		{
-			total_length = 0;
+			// in the case of an empty DPU, we must provide a dummy buffer for prepare_xfer
+			buffer_length = 0;
 			buffer = dummy_buffer;
 		}
 
@@ -121,7 +127,7 @@ int search_rank(struct dpu_set_t dpu_rank, uint8_t rank_id, struct host_dpu_desc
 		for (file=0; file < NR_TASKLETS; file++)
 		{
 			input_start[file] = input[dpu_id].files[file].start;
-			chunk_size[file] = input[dpu_id].files[file].length;
+			input_size[file] = input[dpu_id].files[file].length;
 		}
 
 		// copy the data to the DPU
@@ -131,24 +137,37 @@ int search_rank(struct dpu_set_t dpu_rank, uint8_t rank_id, struct host_dpu_desc
 			dbg_printf("Error %u copying dpu_id\n", err);
 			return -1;
 		}
-		err = dpu_copy_to(dpu, "total_length", 0, &total_length, sizeof(uint32_t));
+		err = dpu_copy_to(dpu, "total_length", 0, &input[dpu_id].total_length, sizeof(uint32_t));
 		if (err != DPU_OK)
 		{
 			dbg_printf("Error %u copying total_length\n", err);
 			return -1;
 		}
-		err = dpu_copy_to(dpu, "input_chunk_size", 0, &chunk_size, sizeof(uint32_t) * NR_TASKLETS);
+		err = dpu_copy_to(dpu, "file_size", 0, &input_size, sizeof(uint32_t) * MAX_FILES_PER_DPU);
+		if (err != DPU_OK)
+		{
+			dbg_printf("Error %u copying input size\n", err);
+			return -1;
+		}
+		err = dpu_copy_to(dpu, "file_start", 0, &input_start, sizeof(uint32_t) * MAX_FILES_PER_DPU);
 		if (err != DPU_OK)
 		{
 			dbg_printf("Error %u copying chunk size\n", err);
 			return -1;
 		}
-		err = dpu_copy_to(dpu, "input_start", 0, &input_start, sizeof(uint32_t) * NR_TASKLETS);
+		err = dpu_copy_to(dpu, "chunk_size", 0, &chunk_size, sizeof(uint32_t));
 		if (err != DPU_OK)
 		{
 			dbg_printf("Error %u copying chunk size\n", err);
 			return -1;
 		}
+		err = dpu_copy_to(dpu, "file_count", 0, &file_count, sizeof(uint32_t));
+		if (err != DPU_OK)
+		{
+			dbg_printf("Error %u copying file count\n", err);
+			return -1;
+		}
+
 #ifdef BULK_TRANSFER
 		err = dpu_prepare_xfer(dpu, (void*)buffer);
 		if (err != DPU_OK)
@@ -159,8 +178,8 @@ int search_rank(struct dpu_set_t dpu_rank, uint8_t rank_id, struct host_dpu_desc
 
 		// keep track of the largest length seen so far, since the xfer must be
 		// the size of the largest buffer
-		if (total_length > largest_length)
-			largest_length = total_length;
+		if (buffer_length > largest_length)
+			largest_length = buffer_length;
 #else
 		err = dpu_copy_to(dpu, "input_buffer", 0, buffer, ALIGN(total_length, 8));
 		if (err != DPU_OK)
@@ -610,8 +629,7 @@ int main(int argc, char **argv)
 			{
 				dpu_id++;
 				dpu_id%=dpus_per_rank;
-				dbg_printf("Searching DPU %u\n", dpu_id);
-				if (rank_input[dpu_id].file_count < NR_TASKLETS &&
+				if (rank_input[dpu_id].file_count < MAX_FILES_PER_DPU &&
 					(rank_input[dpu_id].total_length + file_length < MAX_INPUT_LENGTH))
 				{
 					dbg_printf("Using DPU %u file count=%u, est final length=%lu\n",
@@ -652,12 +670,10 @@ int main(int argc, char **argv)
 
 			// did we look at all possible DPUs and not find an empty place?
 			if (dpus_searched == dpus_per_rank)
-			{
-				dbg_printf("no more room\n");
 				break;
-			}
 		}
 
+		dbg_printf("%2.2f%% of %u MB\n", (double)rank_input[dpu_id].total_length * 100 / TOTAL_MRAM, TOTAL_MRAM>>20);
 		dbg_printf("Prepared %u files in %u DPUs status=%s\n", prepared_file_count, prepared_dpu_count, to_bin(rank_status, rank_count));
 		submitted = 0;
 		while (!submitted)
@@ -680,7 +696,7 @@ int main(int argc, char **argv)
 				{
 					rank_status |= (1UL<<rank_id);
 					dbg_printf("Submitted to rank %u status=%s\n", rank_id, to_bin(rank_status, rank_count));
-					status = search_rank(dpu_rank, rank_id, rank_input, prepared_dpu_count, pattern, &opts);
+					status = search_rank(dpu_rank, rank_id, rank_input, prepared_file_count, prepared_dpu_count, pattern, &opts);
 					ctx[rank_id].dpus = rank_input;
 					ctx[rank_id].dpu_count = prepared_dpu_count;
 					submitted = 1;

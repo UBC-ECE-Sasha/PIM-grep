@@ -14,17 +14,17 @@ __host char pattern[64];
 // WRAM input variables - per DPU
 __host uint32_t dpu_id;
 __host uint32_t total_length;
-
-// WRAM input variables - per tasklet
-__host uint32_t input_chunk_size[NR_TASKLETS];
-__host uint32_t input_start[NR_TASKLETS];
+__host uint32_t file_count;
+__host uint32_t chunk_size; // work for each tasklet to do
+__host uint32_t file_size[MAX_FILES_PER_DPU];
+__host uint32_t file_start[MAX_FILES_PER_DPU];
 
 // WRAM output variables
-__host uint32_t line_count[NR_TASKLETS];
-__host uint32_t match_count[NR_TASKLETS];
+__host uint32_t line_count[MAX_FILES_PER_DPU];
+__host uint32_t match_count[MAX_FILES_PER_DPU];
 
 // MRAM variables
-char __mram_noinit input_buffer[MEGABYTE(31)];
+char __mram_noinit input_buffer[MEGABYTE(62)];
 char __mram_noinit output_buffer[MEGABYTE(1)];
 
 int main()
@@ -46,26 +46,38 @@ int main()
 		//dbg_printf("[%u.%u]: pattern: %s\n", dpu_id, task_id, pattern);
 	}
 
-	dbg_printf("[%u:%u]: input start: %u length: %u\n", dpu_id, task_id, input_start[task_id], input_chunk_size[task_id]);
-	
 	// Prepare the input and output descriptors
 	// As long as there is at least 1 byte, there is 1 line. But since it does
 	// not necessarily end in a newline, we won't detect it.
 	line_count[task_id] = 1;
 	match_count[task_id] = 0;
-	if (input_start[task_id] == -1)
+
+	uint32_t input_start = chunk_size * task_id;
+	uint32_t input_length = chunk_size;
+
+	if (input_start > total_length)
 	{
 		printf("Thread %u has no data\n", task_id);
 		return 0;
 	}
 
+	// make sure we don't go past the end of the last chunk
+	if (input_start + input_length > total_length)
+		input_length = total_length - input_start;
+
+	dbg_printf("[%u:%u]: input start: %u length: %u\n", dpu_id, task_id, input_start, input_length);
+
 	chunk.cache = seqread_alloc();
-	chunk.ptr = seqread_init(chunk.cache, input_buffer + input_start[task_id], &chunk.sr);
-	chunk.length = input_chunk_size[task_id];
+	chunk.ptr = seqread_init(chunk.cache, input_buffer + input_start, &chunk.sr);
+	chunk.length = input_length;
 
 //	perfcounter_config(COUNT_CYCLES, true);
 
-	match_count[task_id] = grep(&chunk, &line_count[task_id]);
+	// which file are we starting with?
+	uint32_t file_id=0;
+	while (input_start < file_start[file_id])
+		file_id++;
+	grep(&chunk, input_start, file_id);
 
 	// wait for all tasks to finish
 	//printf("[%u] completed in %ld cycles\n", task_id, perfcounter_get());

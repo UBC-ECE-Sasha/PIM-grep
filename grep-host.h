@@ -45,7 +45,7 @@ typedef struct host_dpu_descriptor
 	uint32_t file_count; // how many files are processed by this DPU
 	uint32_t total_length; // size of the concatenated buffer
 	char *buffer; // concatenated buffer for this DPU
-	host_file_descriptor files[NR_TASKLETS];
+	host_file_descriptor files[MAX_FILES_PER_DPU];
 } host_dpu_descriptor;
 
 typedef struct host_rank_context
