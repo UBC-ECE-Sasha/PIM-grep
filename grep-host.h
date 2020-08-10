@@ -30,14 +30,18 @@ struct grep_options
 	uint32_t max_files;	/* stop processing after this many files */
 }__attribute__((aligned(8)));
 
+typedef struct file_stats
+{
+	uint32_t line_count; // total lines in the file
+	uint32_t match_count; // total matches of the search term
+} file_stats;
+
 typedef struct host_file_descriptor
 {
 	char *filename;
 	uint32_t start; 	// offset into host_dpu_descriptor.buffer
 	uint32_t length;
 	uint32_t max;
-	uint32_t line_count; // total lines in the file
-	uint32_t match_count; // total matches of the search term
 } host_file_descriptor;
 
 typedef struct host_dpu_descriptor
@@ -47,6 +51,7 @@ typedef struct host_dpu_descriptor
 	uint32_t perf[NR_TASKLETS];
 	char *buffer; // concatenated buffer for this DPU
 	host_file_descriptor files[MAX_FILES_PER_DPU];
+	file_stats stats[MAX_FILES_PER_DPU];
 } host_dpu_descriptor;
 
 typedef struct host_rank_context

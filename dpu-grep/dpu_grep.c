@@ -13,8 +13,7 @@ extern uint32_t file_count;
 extern struct grep_options options;
 extern uint32_t file_size[MAX_FILES_PER_DPU];
 extern uint32_t file_start[MAX_FILES_PER_DPU];
-extern uint32_t line_count[MAX_FILES_PER_DPU];
-extern uint32_t match_count[MAX_FILES_PER_DPU];
+extern file_stats stats[MAX_FILES_PER_DPU];
 
 static unsigned char READ_BYTE(struct in_buffer_context *_i)
 {
@@ -48,7 +47,7 @@ uint32_t grep(struct in_buffer_context *buf, uint32_t start, uint32_t file_id)
 
 		// is this a newline?
 		if (c == '\n')
-			line_count[file_id]++;
+			stats[file_id].line_count++;
 
 		if (pattern[p_index++] != c)
 			p_index = 0;
@@ -65,10 +64,10 @@ uint32_t grep(struct in_buffer_context *buf, uint32_t start, uint32_t file_id)
 				if (IS_OPTION_SET(&options, OPTION_FLAG_COUNT_MATCHES))
 				{
 					// only count unique lines that match
-					if (*line_count != prev_match_line)
+					if (stats[file_id].line_count != prev_match_line)
 					{
-						match_count[file_id]++;
-						prev_match_line = *line_count;
+						stats[file_id].match_count++;
+						prev_match_line = stats[file_id].line_count;
 					}
 				}
 				else
@@ -102,7 +101,7 @@ uint32_t grep(struct in_buffer_context *buf, uint32_t start, uint32_t file_id)
 		if (p_index == pattern_length)
 		{
 			dbg_printf("[%u]: match in file %u\n", task_id, file_id);
-			match_count[file_id]++;
+			stats[file_id].match_count++;
 			break;
 		}
 	}

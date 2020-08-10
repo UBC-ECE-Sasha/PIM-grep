@@ -215,12 +215,11 @@ int read_results_dpu_rank(struct dpu_set_t dpu_rank, struct host_rank_context *r
 {
 	struct dpu_set_t dpu;
 	dpu_error_t err;
-	uint32_t line_count[NR_TASKLETS];
-	uint32_t match_count[NR_TASKLETS];
 	uint8_t dpu_id;
 
 
 #ifdef BULK_TRANSFER
+	// get performance metrics (instructions per tasklet)
 	uint32_t size = ALIGN(sizeof(rank_ctx->dpus[dpu_id].perf), 8);
 	DPU_FOREACH(dpu_rank, dpu, dpu_id)
 	{
@@ -233,6 +232,24 @@ int read_results_dpu_rank(struct dpu_set_t dpu_rank, struct host_rank_context *r
 	}
 	dbg_printf("Transferring %u bytes\n", size);
 	err = dpu_push_xfer(dpu_rank, DPU_XFER_FROM_DPU, "perf", 0, size, DPU_XFER_DEFAULT);
+	if (err != DPU_OK)
+	{
+		dbg_printf("Error %u pushing xfer\n", err);
+		return -1;
+	}
+
+	// get file statistics
+	size = ALIGN(sizeof(rank_ctx->dpus[dpu_id].stats), 8);
+	DPU_FOREACH(dpu_rank, dpu, dpu_id)
+	{
+		err = dpu_prepare_xfer(dpu, (void*)rank_ctx->dpus[dpu_id].stats);
+		if (err != DPU_OK)
+		{
+			dbg_printf("Error %u preparing xfer for results\n", err);
+			return -1;
+		}
+	}
+	err = dpu_push_xfer(dpu_rank, DPU_XFER_FROM_DPU, "stats", 0, size, DPU_XFER_DEFAULT);
 	if (err != DPU_OK)
 	{
 		dbg_printf("Error %u pushing xfer\n", err);
@@ -254,7 +271,7 @@ int read_results_dpu_rank(struct dpu_set_t dpu_rank, struct host_rank_context *r
 			break;
 
 #ifdef DEBUG_DPU
-		//printf("Retrieving results from %s\n", ctx->desc[dpu_id].filename);
+		// get any DPU debug messages
 		err = dpu_log_read(dpu, stdout);
 		if (err != DPU_OK)
 		{
@@ -263,29 +280,18 @@ int read_results_dpu_rank(struct dpu_set_t dpu_rank, struct host_rank_context *r
 		}
 #endif // DEBUG_DPU
 
+#ifndef BULK_TRANSFER
 		// Get the results back from each individual DPU in the rank
-		err = dpu_copy_from(dpu, "line_count", 0, line_count, sizeof(uint32_t) * NR_TASKLETS);
+		err = dpu_copy_from(dpu, "stats", 0, &rank_ctx->dpus[dpu_id].stats, sizeof(file_stats) * MAX_FILES_PER_DPU);
 		if (err != DPU_OK)
 		{
 			dbg_printf("Error %u getting line count\n", err);
 			return -1;
 		}
-		err = dpu_copy_from(dpu, "match_count", 0, match_count, sizeof(uint32_t) * NR_TASKLETS);
-		if (err != DPU_OK)
-		{
-			dbg_printf("Error %u retrieving match count\n", err);
-			return -1;
-		}
 
 		// the list containing precise offset in the file for each match
 		//DPU_ASSERT(dpu_copy_from(dpu, "matches", 0, matches, sizeof(uint32_t) * match_count);
-
-		// copy per-file statistics
-		for (uint32_t file=0; file < NR_TASKLETS; file++)
-		{
-			rank_ctx->dpus[dpu_id].files[file].line_count = line_count[file];
-			rank_ctx->dpus[dpu_id].files[file].match_count = match_count[file];
-		}
+#endif //BULK_TRANSFER
 	}
 
 	return 0;
@@ -351,9 +357,9 @@ int check_for_completed_rank(struct dpu_set_t dpus, uint64_t* rank_status, struc
 
 					for (uint32_t file=0; file < rank_ctx->dpus[dpu_id].file_count; file++)
 					{
-						results->total_line_count += rank_ctx->dpus[dpu_id].files[file].line_count;
-						results->total_match_count += rank_ctx->dpus[dpu_id].files[file].match_count;
-						printf("%s:%u\n", rank_ctx->dpus[dpu_id].files[file].filename, rank_ctx->dpus[dpu_id].files[file].match_count);
+						results->total_line_count += rank_ctx->dpus[dpu_id].stats[file].line_count;
+						results->total_match_count += rank_ctx->dpus[dpu_id].stats[file].match_count;
+						printf("%s:%u\n", rank_ctx->dpus[dpu_id].files[file].filename, rank_ctx->dpus[dpu_id].stats[file].match_count);
 
 						// free the memory of the descriptor
 						free(rank_ctx->dpus[dpu_id].files[file].filename);
