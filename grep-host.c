@@ -219,6 +219,35 @@ int read_results_dpu_rank(struct dpu_set_t dpu_rank, struct host_rank_context *r
 	uint32_t match_count[NR_TASKLETS];
 	uint8_t dpu_id;
 
+
+#ifdef BULK_TRANSFER
+	uint32_t size = ALIGN(sizeof(rank_ctx->dpus[dpu_id].perf), 8);
+	DPU_FOREACH(dpu_rank, dpu, dpu_id)
+	{
+		err = dpu_prepare_xfer(dpu, (void*)rank_ctx->dpus[dpu_id].perf);
+		if (err != DPU_OK)
+		{
+			dbg_printf("Error %u preparing xfer for results\n", err);
+			return -1;
+		}
+	}
+	dbg_printf("Transferring %u bytes\n", size);
+	err = dpu_push_xfer(dpu_rank, DPU_XFER_FROM_DPU, "perf", 0, size, DPU_XFER_DEFAULT);
+	if (err != DPU_OK)
+	{
+		dbg_printf("Error %u pushing xfer\n", err);
+		return -1;
+	}
+#endif //BULK_TRANSFER
+
+	DPU_FOREACH(dpu_rank, dpu, dpu_id)
+	{
+		for (uint32_t tasklet_id=0; tasklet_id < NR_TASKLETS; tasklet_id++)
+		{
+			printf("[%u.%u] instructions=%u\n", dpu_id, tasklet_id, rank_ctx->dpus[dpu_id].perf[tasklet_id]);
+		}
+	}
+
 	DPU_FOREACH(dpu_rank, dpu, dpu_id)
 	{
 		if (dpu_id >= rank_ctx->dpu_count)

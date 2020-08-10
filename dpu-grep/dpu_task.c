@@ -22,6 +22,7 @@ __host uint32_t file_start[MAX_FILES_PER_DPU];
 // WRAM output variables
 __host uint32_t line_count[MAX_FILES_PER_DPU];
 __host uint32_t match_count[MAX_FILES_PER_DPU];
+__host uint32_t perf[NR_TASKLETS];
 
 // MRAM variables
 char __mram_noinit input_buffer[MEGABYTE(62)];
@@ -71,17 +72,15 @@ int main()
 	chunk.ptr = seqread_init(chunk.cache, input_buffer + input_start, &chunk.sr);
 	chunk.length = input_length;
 
-//	perfcounter_config(COUNT_CYCLES, true);
-
 	// which file are we starting with?
 	uint32_t file_id=0;
 	while (input_start < file_start[file_id])
 		file_id++;
-	grep(&chunk, input_start, file_id);
 
-	// wait for all tasks to finish
-	//printf("[%u] completed in %ld cycles\n", task_id, perfcounter_get());
-	//dbg_printf("%u matches in %u lines\n", match_count[task_id], line_count[task_id]);
+	perfcounter_config(COUNT_INSTRUCTIONS, true);
+	grep(&chunk, input_start, file_id);
+	perf[task_id] = perfcounter_get();
+
 	return 0;
 }
 
