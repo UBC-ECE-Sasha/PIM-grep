@@ -104,12 +104,14 @@ int search_rank(struct dpu_set_t dpu_rank, uint8_t rank_id, struct host_dpu_desc
 	DPU_FOREACH(dpu_rank, dpu, dpu_id)
 	{
 		// copy the data to the DPU
+#ifdef DEBUG_DPU
 		err = dpu_copy_to(dpu, "dpu_id", 0, &dpu_id, sizeof(uint32_t));
 		if (err != DPU_OK)
 		{
 			dbg_printf("Error %u copying dpu_id\n", err);
 			return -1;
 		}
+#endif // DEBUG_DPU
 		err = dpu_copy_to(dpu, "total_length", 0, &input[dpu_id].total_length, sizeof(uint32_t));
 		if (err != DPU_OK)
 		{
@@ -133,9 +135,7 @@ int search_rank(struct dpu_set_t dpu_rank, uint8_t rank_id, struct host_dpu_desc
 		// copy file contents
 		if (dpu_id < used_dpus)
 		{
-			buffer_length = MIN(MAX_INPUT_LENGTH, input[dpu_id].total_length);
-			buffer = input[dpu_id].buffer;
-			err = dpu_copy_to(dpu, "input_buffer", 0, buffer, ALIGN(total_length, 8));
+			err = dpu_copy_to(dpu, "input_buffer", 0, input[dpu_id].buffer, ALIGN(input[dpu_id].total_length, 8));
 			if (err != DPU_OK)
 			{
 				dbg_printf("Error %u copying input buffer\n", err);
@@ -154,10 +154,11 @@ int search_rank(struct dpu_set_t dpu_rank, uint8_t rank_id, struct host_dpu_desc
 	}
 
 #ifdef BULK_TRANSFER
-	uint32_t largest_length=0; // largest file size we have to transfer
+	uint32_t largest_length;
 	char *buffer;
 
 	// transfer the buffers (file contents)
+	largest_length=0;
 	DPU_FOREACH(dpu_rank, dpu, dpu_id)
 	{
 		uint32_t buffer_length = MIN(MAX_INPUT_LENGTH, input[dpu_id].total_length);
@@ -196,6 +197,7 @@ int search_rank(struct dpu_set_t dpu_rank, uint8_t rank_id, struct host_dpu_desc
 	}
 
 	// transfer the file start & length in the buffer
+	largest_length=0;
 	DPU_FOREACH(dpu_rank, dpu, dpu_id)
 	{
 		err = dpu_prepare_xfer(dpu, (void*)input[dpu_id].files);
@@ -204,8 +206,11 @@ int search_rank(struct dpu_set_t dpu_rank, uint8_t rank_id, struct host_dpu_desc
 			dbg_printf("Error %u copying input files\n", err);
 			return -1;
 		}
+		if (input[dpu_id].file_count > largest_length)
+			largest_length = input[dpu_id].file_count;
 	}
-	err = dpu_push_xfer(dpu_rank, DPU_XFER_TO_DPU, "file", 0, ALIGN(sizeof(file_descriptor) * MAX_FILES_PER_DPU, 8), DPU_XFER_DEFAULT);
+	err = dpu_push_xfer(dpu_rank, DPU_XFER_TO_DPU, "file", 0,
+		ALIGN(sizeof(file_descriptor) * largest_length, 8), DPU_XFER_DEFAULT);
 	if (err != DPU_OK)
 	{
 		dbg_printf("Error %u pushing file info\n", err);
@@ -222,7 +227,7 @@ int search_rank(struct dpu_set_t dpu_rank, uint8_t rank_id, struct host_dpu_desc
 			return -1;
 		}
 	}
-	err = dpu_push_xfer(dpu_rank, DPU_XFER_TO_DPU, "pattern", 0, ALIGN(pattern_length, 4), DPU_XFER_DEFAULT);
+	err = dpu_push_xfer(dpu_rank, DPU_XFER_TO_DPU, "pattern", 0, ALIGN(pattern_length, 8), DPU_XFER_DEFAULT);
 	if (err != DPU_OK)
 	{
 		dbg_printf("Error %u copying pattern\n", err);

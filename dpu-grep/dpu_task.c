@@ -12,13 +12,13 @@ __host uint32_t pattern_length;
 __host char pattern[64];
 
 // WRAM input variables - per DPU
-__host uint32_t dpu_id;
 __host uint32_t total_length;
 __host uint32_t file_count;
 __host uint32_t chunk_size; // work for each tasklet to do
-//__host uint32_t file_size[MAX_FILES_PER_DPU];
-//__host uint32_t file_start[MAX_FILES_PER_DPU];
 __host file_descriptor file[MAX_FILES_PER_DPU];
+#ifdef DEBUG
+__host uint32_t dpu_id;
+#endif // DEBUG
 
 // WRAM output variables
 __host file_stats stats[MAX_FILES_PER_DPU];
@@ -43,8 +43,6 @@ int main()
 		);
 
 		dbg_printf("Sequential reader buffer size: %u\n", SEQREAD_CACHE_SIZE);
-		//dbg_printf("[%u.%u]: pattern length: %u\n", dpu_id, task_id, pattern_length);
-		//dbg_printf("[%u.%u]: pattern: %s\n", dpu_id, task_id, pattern);
 	}
 
 	uint32_t input_start = chunk_size * task_id;
