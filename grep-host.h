@@ -64,6 +64,7 @@ typedef struct host_results
 	uint32_t total_line_count;
 	uint32_t total_match_count;
 	uint32_t total_files;
+	uint64_t total_instructions;
 } host_results;
 
 #endif	/* _GREP_HOST_H_ */

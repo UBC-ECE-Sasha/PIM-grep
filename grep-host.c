@@ -294,14 +294,6 @@ int read_results_dpu_rank(struct dpu_set_t dpu_rank, struct host_rank_context *r
 
 	DPU_FOREACH(dpu_rank, dpu, dpu_id)
 	{
-		for (uint32_t tasklet_id=0; tasklet_id < NR_TASKLETS; tasklet_id++)
-		{
-			printf("[%u.%u] instructions=%u\n", dpu_id, tasklet_id, rank_ctx->dpus[dpu_id].perf[tasklet_id]);
-		}
-	}
-
-	DPU_FOREACH(dpu_rank, dpu, dpu_id)
-	{
 		if (dpu_id >= rank_ctx->dpu_count)
 			break;
 
@@ -386,9 +378,13 @@ int check_for_completed_rank(struct dpu_set_t dpus, uint64_t* rank_status, struc
 				*rank_status &= ~((uint64_t)1<<rank_id);
 				dbg_printf("Reading results from rank %u status %s\n", rank_id, to_bin(*rank_status, rank_count));
 				read_results_dpu_rank(dpu_rank, rank_ctx);
+
+				// aggregate statistics
 				for (dpu_id=0; dpu_id < rank_ctx->dpu_count; dpu_id++)
 				{
 					results->total_files += rank_ctx->dpus[dpu_id].file_count;
+					for (uint32_t tasklet_id=0; tasklet_id < NR_TASKLETS; tasklet_id++)
+						results->total_instructions += rank_ctx->dpus[dpu_id].perf[tasklet_id];
 
 					for (uint32_t file=0; file < rank_ctx->dpus[dpu_id].file_count; file++)
 					{
@@ -735,7 +731,9 @@ int main(int argc, char **argv)
 				break;
 		}
 
-		dbg_printf("%2.2f%% of %u MB\n", (double)rank_input[dpu_id].total_length * 100 / TOTAL_MRAM, TOTAL_MRAM>>20);
+#ifdef STATISTICS
+		printf("[%u] %2.2f%% of %u MB\n", dpu_id, (double)rank_input[dpu_id].total_length * 100 / TOTAL_MRAM, TOTAL_MRAM>>20);
+#endif // STATISTICS
 		dbg_printf("Prepared %u files in %u DPUs status=%s\n", prepared_file_count, prepared_dpu_count, to_bin(rank_status, rank_count));
 		submitted = 0;
 		while (!submitted)
@@ -809,7 +807,9 @@ done:
 	printf("Total data processed: %lu\n", total_data_processed);
 	printf("Total time: %0.2fs\n", total_time);
 	printf("Total DPUs launched: %lu\n", total_dpus_launched);
-	printf("Average utilization per DPU: %2.3f\n", (double)total_data_processed / (double)total_dpus_launched / (double)TOTAL_MRAM);
+	printf("Total instructions: %lu\n", results.total_instructions);
+	printf("Average instructions per byte: %lu\n", results.total_instructions / total_data_processed);
+	printf("Average utilization per DPU: %2.3f%%\n", (double)total_data_processed * 100 / (double)total_dpus_launched / (double)TOTAL_MRAM);
 #endif // STATISTICS
 
 	return 0;
