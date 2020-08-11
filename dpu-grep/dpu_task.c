@@ -16,8 +16,9 @@ __host uint32_t dpu_id;
 __host uint32_t total_length;
 __host uint32_t file_count;
 __host uint32_t chunk_size; // work for each tasklet to do
-__host uint32_t file_size[MAX_FILES_PER_DPU];
-__host uint32_t file_start[MAX_FILES_PER_DPU];
+//__host uint32_t file_size[MAX_FILES_PER_DPU];
+//__host uint32_t file_start[MAX_FILES_PER_DPU];
+__host file_descriptor file[MAX_FILES_PER_DPU];
 
 // WRAM output variables
 __host file_stats stats[MAX_FILES_PER_DPU];
@@ -67,7 +68,7 @@ int main()
 
 	// which file are we starting with?
 	uint32_t file_id=0;
-	while (input_start < file_start[file_id])
+	while (input_start < file[file_id].start)
 		file_id++;
 
 	// As long as there is at least 1 byte, there is 1 line. But since it does

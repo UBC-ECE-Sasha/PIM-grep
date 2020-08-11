@@ -36,12 +36,11 @@ typedef struct file_stats
 	uint32_t match_count; // total matches of the search term
 } file_stats;
 
-typedef struct host_file_descriptor
+typedef struct file_descriptor
 {
-	char *filename;
 	uint32_t start; 	// offset into host_dpu_descriptor.buffer
 	uint32_t length;
-} host_file_descriptor;
+} file_descriptor;
 
 typedef struct host_dpu_descriptor
 {
@@ -49,7 +48,8 @@ typedef struct host_dpu_descriptor
 	uint32_t total_length; // size of the concatenated buffer
 	uint32_t perf[NR_TASKLETS];
 	char *buffer; // concatenated buffer for this DPU
-	host_file_descriptor files[MAX_FILES_PER_DPU];
+	char *filename[MAX_FILES_PER_DPU];
+	file_descriptor files[MAX_FILES_PER_DPU];
 	file_stats stats[MAX_FILES_PER_DPU];
 } host_dpu_descriptor;
 

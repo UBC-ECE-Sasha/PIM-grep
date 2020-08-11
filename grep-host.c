@@ -98,38 +98,8 @@ int search_rank(struct dpu_set_t dpu_rank, uint8_t rank_id, struct host_dpu_desc
 	}
 
 	// copy the items specific to each DPU
-#ifdef BULK_TRANSFER
-	uint32_t largest_length=0; // largest file size we have to transfer
-#endif // BULK_TRANSFER
-	const char* buffer;
 	DPU_FOREACH(dpu_rank, dpu, dpu_id)
 	{
-		uint32_t input_size[MAX_FILES_PER_DPU]; // the length of each file
-		uint32_t input_start[MAX_FILES_PER_DPU]; // the start offset of each file in the shared buffer
-		uint32_t buffer_length;
-
-		if (dpu_id < used_dpus)
-		{
-			buffer_length = MIN(MAX_INPUT_LENGTH, input[dpu_id].total_length);
-			buffer = input[dpu_id].buffer;
-			// calculate an equal amount of work that each tasklet should do
-			chunk_size = MAX(MIN_CHUNK_SIZE, ALIGN(buffer_length / NR_TASKLETS, 8));
-		}
-		else
-		{
-			// in the case of an empty DPU, we must provide a dummy buffer for prepare_xfer
-			buffer_length = 0;
-			buffer = dummy_buffer;
-		}
-
-		// copy the per-file items for this DPU
-		uint32_t file;
-		for (file=0; file < NR_TASKLETS; file++)
-		{
-			input_start[file] = input[dpu_id].files[file].start;
-			input_size[file] = input[dpu_id].files[file].length;
-		}
-
 		// copy the data to the DPU
 		err = dpu_copy_to(dpu, "dpu_id", 0, &dpu_id, sizeof(uint32_t));
 		if (err != DPU_OK)
@@ -143,16 +113,10 @@ int search_rank(struct dpu_set_t dpu_rank, uint8_t rank_id, struct host_dpu_desc
 			dbg_printf("Error %u copying total_length\n", err);
 			return -1;
 		}
-		err = dpu_copy_to(dpu, "file_size", 0, &input_size, sizeof(uint32_t) * MAX_FILES_PER_DPU);
+		err = dpu_copy_to(dpu, "file", 0, &input[dpu_id].files, sizeof(file_descriptor) * file_count);
 		if (err != DPU_OK)
 		{
 			dbg_printf("Error %u copying input size\n", err);
-			return -1;
-		}
-		err = dpu_copy_to(dpu, "file_start", 0, &input_start, sizeof(uint32_t) * MAX_FILES_PER_DPU);
-		if (err != DPU_OK)
-		{
-			dbg_printf("Error %u copying chunk size\n", err);
 			return -1;
 		}
 		err = dpu_copy_to(dpu, "chunk_size", 0, &chunk_size, sizeof(uint32_t));
@@ -168,7 +132,41 @@ int search_rank(struct dpu_set_t dpu_rank, uint8_t rank_id, struct host_dpu_desc
 			return -1;
 		}
 
+#ifndef BULK_TRANSFER
+		if (dpu_id < used_dpus)
+		{
+			buffer_length = MIN(MAX_INPUT_LENGTH, input[dpu_id].total_length);
+			buffer = input[dpu_id].buffer;
+			err = dpu_copy_to(dpu, "input_buffer", 0, buffer, ALIGN(total_length, 8));
+			if (err != DPU_OK)
+			{
+				dbg_printf("Error %u copying input buffer\n", err);
+				return -1;
+			}
+		}
+#endif //BULK_TRANSFER
+	}
+
 #ifdef BULK_TRANSFER
+	uint32_t largest_length=0; // largest file size we have to transfer
+	char *buffer;
+	DPU_FOREACH(dpu_rank, dpu, dpu_id)
+	{
+		uint32_t buffer_length = MIN(MAX_INPUT_LENGTH, input[dpu_id].total_length);
+		if (dpu_id < used_dpus)
+		{
+			buffer_length = MIN(MAX_INPUT_LENGTH, input[dpu_id].total_length);
+			buffer = input[dpu_id].buffer;
+			// calculate an equal amount of work that each tasklet should do
+			chunk_size = MAX(MIN_CHUNK_SIZE, ALIGN(buffer_length / NR_TASKLETS, 8));
+		}
+		else
+		{
+			// in the case of an empty DPU, we must provide a dummy buffer for prepare_xfer
+			buffer_length = 0;
+			buffer = dummy_buffer;
+		}
+
 		err = dpu_prepare_xfer(dpu, (void*)buffer);
 		if (err != DPU_OK)
 		{
@@ -180,17 +178,7 @@ int search_rank(struct dpu_set_t dpu_rank, uint8_t rank_id, struct host_dpu_desc
 		// the size of the largest buffer
 		if (buffer_length > largest_length)
 			largest_length = buffer_length;
-#else
-		err = dpu_copy_to(dpu, "input_buffer", 0, buffer, ALIGN(total_length, 8));
-		if (err != DPU_OK)
-		{
-			dbg_printf("Error %u copying input buffer\n", err);
-			return -1;
-		}
-#endif //BULK_TRANSFER
 	}
-
-#ifdef BULK_TRANSFER
 	dbg_printf("Transferring %u bytes\n", ALIGN(largest_length, 8));
 	err = dpu_push_xfer(dpu_rank, DPU_XFER_TO_DPU, "input_buffer", 0, ALIGN(largest_length, 8), DPU_XFER_DEFAULT);
 	if (err != DPU_OK)
@@ -339,7 +327,7 @@ int check_for_completed_rank(struct dpu_set_t dpus, uint64_t* rank_status, struc
 				{
 					// free the memory of the descriptor
 					for (uint32_t file=0; file < rank_ctx->dpus[dpu_id].file_count; file++)
-						free(rank_ctx->dpus[dpu_id].files[file].filename);
+						free(rank_ctx->dpus[dpu_id].filename[file]);
 				}
 				free(rank_ctx->dpus);
 
@@ -359,10 +347,10 @@ int check_for_completed_rank(struct dpu_set_t dpus, uint64_t* rank_status, struc
 					{
 						results->total_line_count += rank_ctx->dpus[dpu_id].stats[file].line_count;
 						results->total_match_count += rank_ctx->dpus[dpu_id].stats[file].match_count;
-						printf("%s:%u\n", rank_ctx->dpus[dpu_id].files[file].filename, rank_ctx->dpus[dpu_id].stats[file].match_count);
+						printf("%s:%u\n", rank_ctx->dpus[dpu_id].filename[file], rank_ctx->dpus[dpu_id].stats[file].match_count);
 
 						// free the memory of the descriptor
-						free(rank_ctx->dpus[dpu_id].files[file].filename);
+						free(rank_ctx->dpus[dpu_id].filename[file]);
 					}
 				}
 				free(rank_ctx->dpus);
@@ -380,7 +368,7 @@ int check_for_completed_rank(struct dpu_set_t dpus, uint64_t* rank_status, struc
  * @param in_file The input filename.
  * @param input The struct to which contents of file are written to.
  */
-static int read_input_host(char *in_file, uint64_t length, char *buffer, struct host_file_descriptor *input)
+static int read_input_host(char *in_file, uint64_t length, char *buffer, struct file_descriptor *input)
 {
 	FILE *fin = fopen(in_file, "r");
 	if (fin == NULL) {
@@ -395,7 +383,6 @@ static int read_input_host(char *in_file, uint64_t length, char *buffer, struct 
 		return -2;
 	}
 
-	input->filename = strdup(in_file);
 	input->length = length;
 	size_t n = fread(buffer, 1, input->length, fin);
 	fclose(fin);
@@ -662,14 +649,15 @@ int main(int argc, char **argv)
 				{
 					dbg_printf("Using DPU %u file count=%u, est final length=%lu\n",
 						dpu_id, rank_input[dpu_id].file_count, rank_input[dpu_id].total_length + file_length);
-					host_file_descriptor *input = &rank_input[dpu_id].files[rank_input[dpu_id].file_count];
+					file_descriptor *input = &rank_input[dpu_id].files[rank_input[dpu_id].file_count];
 
 					// prepare the input buffer descriptor
-					memset(input, 0, sizeof(host_file_descriptor));
+					memset(input, 0, sizeof(file_descriptor));
 					input->start = rank_input[dpu_id].total_length;
 
 					// read the file into the descriptor
 					next = rank_input[dpu_id].buffer + rank_input[dpu_id].total_length;
+					rank_input[dpu_id].filename[rank_input[dpu_id].file_count] = strdup(filename);
 					if (read_input_host(filename, file_length, next, input) < 0)
 					{
 						dbg_printf("Skipping invalid file %s\n", input_files[file_index]);

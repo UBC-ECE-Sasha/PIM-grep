@@ -11,8 +11,9 @@ extern char pattern[64];
 extern uint32_t pattern_length;
 extern uint32_t file_count;
 extern struct grep_options options;
-extern uint32_t file_size[MAX_FILES_PER_DPU];
-extern uint32_t file_start[MAX_FILES_PER_DPU];
+//extern uint32_t file_size[MAX_FILES_PER_DPU];
+//extern uint32_t file_start[MAX_FILES_PER_DPU];
+extern file_descriptor file[MAX_FILES_PER_DPU];
 extern file_stats stats[MAX_FILES_PER_DPU];
 
 static unsigned char READ_BYTE(struct in_buffer_context *_i)
@@ -36,7 +37,7 @@ uint32_t grep(struct in_buffer_context *buf, uint32_t start, uint32_t file_id)
 		char c = READ_BYTE(buf);
 
 		// if we are past the end of the file, go to the next one
-		if (start + i > file_size[file_id])
+		if (start + i > file[file_id].length)
 		{
 			file_id++;
 			if (file_id == file_count)
@@ -93,7 +94,7 @@ uint32_t grep(struct in_buffer_context *buf, uint32_t start, uint32_t file_id)
 		char c = READ_BYTE(buf);
 
 		// if we are past the end of the file,  we're done
-		if (start + i > file_size[file_id])
+		if (start + i > file[file_id].length)
 			break;
 
 		if (pattern[p_index++] != c)
