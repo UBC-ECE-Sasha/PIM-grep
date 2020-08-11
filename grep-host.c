@@ -395,13 +395,6 @@ static int read_input_host(char *in_file, uint64_t length, char *buffer, struct 
 		return -2;
 	}
 
-	if (length > input->max)
-	{
-		fprintf(stderr, "Skipping %s: size is too big (%ld > %d)\n",
-				in_file, length, input->max);
-		return -2;
-	}
-
 	input->filename = strdup(in_file);
 	input->length = length;
 	size_t n = fread(buffer, 1, input->length, fin);
@@ -673,7 +666,6 @@ int main(int argc, char **argv)
 
 					// prepare the input buffer descriptor
 					memset(input, 0, sizeof(host_file_descriptor));
-					input->max = MAX_INPUT_LENGTH;
 					input->start = rank_input[dpu_id].total_length;
 
 					// read the file into the descriptor

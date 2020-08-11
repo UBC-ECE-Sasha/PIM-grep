@@ -41,7 +41,6 @@ typedef struct host_file_descriptor
 	char *filename;
 	uint32_t start; 	// offset into host_dpu_descriptor.buffer
 	uint32_t length;
-	uint32_t max;
 } host_file_descriptor;
 
 typedef struct host_dpu_descriptor
