@@ -254,11 +254,11 @@ int read_results_dpu_rank(struct dpu_set_t dpu_rank, struct host_rank_context *r
 
 
 #ifdef BULK_TRANSFER
-	// get performance metrics (instructions per tasklet)
-	uint32_t size = ALIGN(sizeof(rank_ctx->dpus[dpu_id].perf), 8);
+	// get performance metrics (instructions per DPU)
+	uint32_t size = sizeof(uint32_t);
 	DPU_FOREACH(dpu_rank, dpu, dpu_id)
 	{
-		err = dpu_prepare_xfer(dpu, (void*)rank_ctx->dpus[dpu_id].perf);
+		err = dpu_prepare_xfer(dpu, (void*)&rank_ctx->dpus[dpu_id].perf);
 		if (err != DPU_OK)
 		{
 			dbg_printf("Error %u preparing xfer for results\n", err);
@@ -383,8 +383,7 @@ int check_for_completed_rank(struct dpu_set_t dpus, uint64_t* rank_status, struc
 				for (dpu_id=0; dpu_id < rank_ctx->dpu_count; dpu_id++)
 				{
 					results->total_files += rank_ctx->dpus[dpu_id].file_count;
-					for (uint32_t tasklet_id=0; tasklet_id < NR_TASKLETS; tasklet_id++)
-						results->total_instructions += rank_ctx->dpus[dpu_id].perf[tasklet_id];
+					results->total_instructions += rank_ctx->dpus[dpu_id].perf;
 
 					for (uint32_t file=0; file < rank_ctx->dpus[dpu_id].file_count; file++)
 					{

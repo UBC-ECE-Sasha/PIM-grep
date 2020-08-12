@@ -22,7 +22,7 @@ __host uint32_t dpu_id;
 
 // WRAM output variables
 __host file_stats stats[MAX_FILES_PER_DPU];
-__host uint32_t perf[NR_TASKLETS];
+__host uint32_t perf;
 
 // MRAM variables
 char __mram_noinit input_buffer[MEGABYTE(62)];
@@ -37,6 +37,9 @@ int main()
 	{
 		// clear the heap
 		mem_reset();
+
+		// start the performance counter
+		perfcounter_config(COUNT_INSTRUCTIONS, true);
 
 		dbg_printf("options: [%c]\n",
 			(IS_OPTION_SET(&options, OPTION_FLAG_COUNT_MATCHES)) ? 'C' : ' '
@@ -74,10 +77,9 @@ int main()
 	stats[file_id].line_count = 1;
 	stats[file_id].match_count = 0;
 
-	perfcounter_config(COUNT_INSTRUCTIONS, true);
 	grep(&chunk, input_start, file_id);
-	perf[task_id] = perfcounter_get();
+
+	perf = perfcounter_get();
 
 	return 0;
 }
-
