@@ -57,6 +57,9 @@ typedef struct host_rank_context
 {
 	uint32_t dpu_count; // how many dpus are filled in the descriptor array
 	host_dpu_descriptor *dpus; // the descriptors for the dpus in this rank
+#ifdef STATISTICS
+	struct timespec start_rank;
+#endif // STATISTICS
 } host_rank_context;
 
 typedef struct host_results

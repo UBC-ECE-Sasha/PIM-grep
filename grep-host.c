@@ -258,6 +258,12 @@ int read_results_dpu_rank(struct dpu_set_t dpu_rank, struct host_rank_context *r
 	dpu_error_t err;
 	uint8_t dpu_id;
 
+#ifdef STATISTICS
+	struct timespec stop;
+	clock_gettime(CLOCK_MONOTONIC, &stop);
+	double rank_time = TIME_DIFFERENCE(rank_ctx->start_rank, stop);
+	printf("Rank processed in %2.2f s\n", rank_time);
+#endif // STATISTICS
 
 #ifdef BULK_TRANSFER
 	// get performance metrics (instructions per DPU)
@@ -775,6 +781,7 @@ int main(int argc, char **argv)
 				{
 					rank_status |= (1UL<<rank_id);
 					dbg_printf("Submitted to rank %u status=%s\n", rank_id, to_bin(rank_status, rank_count));
+					clock_gettime(CLOCK_MONOTONIC, &ctx[rank_id].start_rank);
 					status = search_rank(dpu_rank, rank_id, rank_input, prepared_file_count, prepared_dpu_count, pattern, &opts);
 					ctx[rank_id].dpus = rank_input;
 					ctx[rank_id].dpu_count = prepared_dpu_count;
