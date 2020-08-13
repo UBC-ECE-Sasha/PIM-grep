@@ -64,6 +64,7 @@ int search_rank(struct dpu_set_t dpu_rank, uint8_t rank_id, struct host_dpu_desc
 	uint32_t chunk_size;
 	UNUSED(rank_id);
 
+/*
 	for (dpu_id=0; dpu_id < used_dpus; dpu_id++)
 	{
 		uint32_t file;
@@ -76,6 +77,8 @@ int search_rank(struct dpu_set_t dpu_rank, uint8_t rank_id, struct host_dpu_desc
 				input[dpu_id].files[file].length);
 		}
 	}
+*/
+
 
 	// copy the common items to all DPUs in the rank
 	err = dpu_copy_to(dpu_rank, "pattern_length", 0, &pattern_length, sizeof(uint32_t));
@@ -118,6 +121,10 @@ int search_rank(struct dpu_set_t dpu_rank, uint8_t rank_id, struct host_dpu_desc
 			dbg_printf("Error %u copying total_length\n", err);
 			return -1;
 		}
+
+		// calculate how much work each tasklet has to do
+		chunk_size = ALIGN(input[dpu_id].total_length, NR_TASKLETS) / NR_TASKLETS;
+
 		err = dpu_copy_to(dpu, "chunk_size", 0, &chunk_size, sizeof(uint32_t));
 		if (err != DPU_OK)
 		{
@@ -188,7 +195,6 @@ int search_rank(struct dpu_set_t dpu_rank, uint8_t rank_id, struct host_dpu_desc
 		if (buffer_length > largest_length)
 			largest_length = buffer_length;
 	}
-	dbg_printf("Transferring %u bytes\n", ALIGN(largest_length, 8));
 	err = dpu_push_xfer(dpu_rank, DPU_XFER_TO_DPU, "input_buffer", 0, ALIGN(largest_length, 8), DPU_XFER_DEFAULT);
 	if (err != DPU_OK)
 	{
@@ -265,7 +271,6 @@ int read_results_dpu_rank(struct dpu_set_t dpu_rank, struct host_rank_context *r
 			return -1;
 		}
 	}
-	dbg_printf("Transferring %u bytes\n", size);
 	err = dpu_push_xfer(dpu_rank, DPU_XFER_FROM_DPU, "perf", 0, size, DPU_XFER_DEFAULT);
 	if (err != DPU_OK)
 	{
@@ -384,6 +389,12 @@ int check_for_completed_rank(struct dpu_set_t dpus, uint64_t* rank_status, struc
 				{
 					results->total_files += rank_ctx->dpus[dpu_id].file_count;
 					results->total_instructions += rank_ctx->dpus[dpu_id].perf;
+					printf("DPU %u: files: %u bytes: %u instructions %u inst/byte: %02.2f\n",
+						dpu_id, 
+						rank_ctx->dpus[dpu_id].file_count,
+						rank_ctx->dpus[dpu_id].total_length,
+						rank_ctx->dpus[dpu_id].perf,
+						(double) rank_ctx->dpus[dpu_id].perf / (double)rank_ctx->dpus[dpu_id].total_length);
 
 					for (uint32_t file=0; file < rank_ctx->dpus[dpu_id].file_count; file++)
 					{
@@ -672,7 +683,6 @@ int main(int argc, char **argv)
 			// read the length of the next input file
 			stat(filename, &st);
 			uint64_t file_length = st.st_size;
-			dbg_printf("Allocating %s (%lu)\n", filename, file_length);
 			if (file_length > MAX_INPUT_LENGTH)
 			{
 				dbg_printf("Skipping file %s (%lu > %u)\n", input_files[file_index], file_length, MAX_INPUT_LENGTH);
@@ -689,8 +699,9 @@ int main(int argc, char **argv)
 				if (rank_input[dpu_id].file_count < MAX_FILES_PER_DPU &&
 					(rank_input[dpu_id].total_length + file_length < MAX_INPUT_LENGTH))
 				{
-					dbg_printf("Using DPU %u file count=%u, est final length=%lu\n",
-						dpu_id, rank_input[dpu_id].file_count, rank_input[dpu_id].total_length + file_length);
+					dbg_printf("Allocating %s to DPU %u file count=%u, length=%lu, total_length=%lu\n",
+						filename, dpu_id, rank_input[dpu_id].file_count,
+						file_length, rank_input[dpu_id].total_length + file_length);
 					file_descriptor *input = &rank_input[dpu_id].files[rank_input[dpu_id].file_count];
 
 					// prepare the input buffer descriptor
@@ -731,9 +742,11 @@ int main(int argc, char **argv)
 		}
 
 #ifdef STATISTICS
-		printf("[%u] %2.2f%% of %u MB\n", dpu_id, (double)rank_input[dpu_id].total_length * 100 / TOTAL_MRAM, TOTAL_MRAM>>20);
+		printf("[%u] %u of %u MB (%2.2f%%)\n", dpu_id,
+			rank_input[dpu_id].total_length, TOTAL_MRAM>>20,
+			(double)rank_input[dpu_id].total_length * 100 / TOTAL_MRAM);
 #endif // STATISTICS
-		dbg_printf("Prepared %u files in %u DPUs status=%s\n", prepared_file_count, prepared_dpu_count, to_bin(rank_status, rank_count));
+		dbg_printf("Prepared %u files in %u DPUs\n", prepared_file_count, prepared_dpu_count);
 		submitted = 0;
 		while (!submitted)
 		{
