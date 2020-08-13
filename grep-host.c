@@ -478,7 +478,7 @@ int main(int argc, char **argv)
 
 #ifdef STATISTICS
 	double total_time;
-	struct timespec start, stop;
+	struct timespec start, stop, start_load, stop_load;
 
 	if (clock_gettime(CLOCK_MONOTONIC, &start) < 0)
 	{
@@ -659,6 +659,11 @@ int main(int argc, char **argv)
 		uint8_t dpu_id=0;
 		uint32_t prepared_file_count;
 		uint8_t prepared_dpu_count=0;
+
+#ifdef STATISTICS
+		clock_gettime(CLOCK_MONOTONIC, &start_load);
+#endif // STATISTICS
+
 		rank_input = calloc(dpus_per_rank, sizeof(struct host_dpu_descriptor));
 
 		// set the dpu_count to 0 for each input
@@ -742,9 +747,11 @@ int main(int argc, char **argv)
 		}
 
 #ifdef STATISTICS
-		printf("[%u] %u of %u MB (%2.2f%%)\n", dpu_id,
+		clock_gettime(CLOCK_MONOTONIC, &stop_load);
+		double load_time = TIME_DIFFERENCE(start_load, stop_load);
+		printf("[%u] %u of %u MB (%2.2f%%)loaded in %2.2f s\n", dpu_id,
 			rank_input[dpu_id].total_length, TOTAL_MRAM>>20,
-			(double)rank_input[dpu_id].total_length * 100 / TOTAL_MRAM);
+			(double)rank_input[dpu_id].total_length * 100 / TOTAL_MRAM, load_time);
 #endif // STATISTICS
 		dbg_printf("Prepared %u files in %u DPUs\n", prepared_file_count, prepared_dpu_count);
 		submitted = 0;
