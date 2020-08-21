@@ -28,6 +28,7 @@ struct grep_options
 	uint8_t out_after;	/* Lines of trailing context. */
 	uint32_t flags;		/* most other single-bit options (see OPTION_FLAG_) */
 	uint32_t max_files;	/* stop processing after this many files */
+	uint32_t max_ranks;	/* use this number of ranks, even if we have more */
 }__attribute__((aligned(8)));
 
 typedef struct file_stats

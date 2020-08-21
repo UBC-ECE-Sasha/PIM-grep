@@ -29,7 +29,7 @@
 #define DPU_ID_SLICE(_x) ((_x >> 8) & 0xFF)
 #define DPU_ID_DPU(_x) ((_x) & 0xFF)
 
-const char options[]="A:B:cdm:t:M";
+const char options[]="A:B:cdm:r:t:M";
 static char dummy_buffer[MAX_INPUT_LENGTH];
 static uint32_t rank_count, dpu_count;
 static uint32_t dpus_per_rank;
@@ -460,6 +460,8 @@ static void usage(const char* exe_name)
 	fprintf(stderr, "B: context before match\n");
 	fprintf(stderr, "c: count all matches; suppress normal output\n");
 	fprintf(stderr, "d: use DPU\n");
+	fprintf(stderr, "m: maximum number of files to process\n");
+	fprintf(stderr, "r: maximum number of ranks to use\n");
 	fprintf(stderr, "t: term to search for\n");
 }
 
@@ -496,6 +498,7 @@ int main(int argc, char **argv)
 	memset(&results, 0, sizeof(host_results));
 	memset(&opts, 0, sizeof(struct grep_options));
 	opts.max_files = -1; // no effective maximum by default
+	opts.max_ranks = -1; // no effective maximum by default
 
 	while ((opt = getopt(argc, argv, options)) != -1)
 	{
@@ -520,6 +523,10 @@ int main(int argc, char **argv)
 
 		case 'm':
 			opts.max_files = strtoul(optarg, NULL, 0);
+			break;
+
+		case 'r':
+			opts.max_ranks = strtoul(optarg, NULL, 0);
 			break;
 
 		case 't':
@@ -634,6 +641,10 @@ int main(int argc, char **argv)
 		dpu_get_nr_dpus(dpus, &dpu_count);
 		dpus_per_rank = dpu_count/rank_count;
 		dbg_printf("Got %u dpus across %u ranks (%u dpus per rank)\n", dpu_count, rank_count, dpus_per_rank);
+
+		// artificially limit the number of ranks based on user request
+		if (rank_count > opts.max_ranks)
+			rank_count= opts.max_ranks;
 
 		snprintf(dpu_program_name, 31, "%s-%u", DPU_PROGRAM, NR_TASKLETS);
 		DPU_ASSERT(dpu_load(dpus, dpu_program_name, NULL));
